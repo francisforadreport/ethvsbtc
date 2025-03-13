@@ -386,13 +386,23 @@ function App() {
 
         setCryptoData(transformedData);
         
-        // Calculate price ratio history
+        // Calculate ETH/BTC ratio (not BTC/ETH)
         const btcPrice = parseFloat(btcResponse.data.lastPrice);
         const ethPrice = parseFloat(ethResponse.data.lastPrice);
-        const ratio = btcPrice / ethPrice;
+        const ratio = ethPrice / btcPrice; // ETH/BTC ratio
+        
+        // Store timestamp for better x-axis display
+        const timestamp = new Date();
+        
         setPriceRatio(prev => {
-          const newData = [...prev, { date: new Date().toLocaleTimeString(), ratio }];
-        return newData.slice(-288); // Keep last 24 hours (288 = 24h * 12 updates per hour)
+          const newData = [...prev, { 
+            date: timestamp.toLocaleTimeString(), 
+            ratio,
+            timestamp,
+            btcPrice,
+            ethPrice
+          }];
+          return newData.slice(-288); // Keep last 24 hours (288 = 24h * 12 updates per hour)
         });
 
       setError(null);
@@ -1138,10 +1148,10 @@ function App() {
   // Sort by market cap to determine leader
   const sortedCrypto = [...cryptoData].sort((a, b) => b.market_cap - a.market_cap);
 
-  // Calculate price ratio
+  // Calculate price ratio and store historical data
   const btcData = cryptoData.find(crypto => crypto.id === 'bitcoin');
   const ethData = cryptoData.find(crypto => crypto.id === 'ethereum');
-  const currentRatio = btcData && ethData ? (btcData.current_price / ethData.current_price).toFixed(2) : 'N/A';
+  const currentRatio = btcData && ethData ? (ethData.current_price / btcData.current_price).toFixed(4) : 'N/A';
 
   // Market Pressure Section
   const PressureBarChart = ({ symbol, data }) => {
@@ -1489,34 +1499,216 @@ function App() {
         </div>
       )}
 
-      {/* BTC/ETH Ratio Section */}
+      {/* ETH/BTC Ratio Section */}
       <div className="price-ratio">
-        <h2>BTC/ETH Price Ratio</h2>
+        <div className="section-header">
+          <h2>ETH/BTC Price Ratio</h2>
+          <DataFreshness type="prices" />
+        </div>
         <div className="ratio-card">
-          <p className="current-ratio">Current Ratio: {currentRatio}</p>
+          <div className="ratio-header">
+            <div className="current-ratio-container">
+              <div className="ratio-main-value">
+                <p className="current-ratio-label">Current Ratio:</p>
+                <p className="current-ratio-value">{currentRatio}</p>
+              </div>
+              {priceRatio.length > 1 && (
+                <div className="ratio-change-container">
+                  <p className={`ratio-change ${
+                    priceRatio[priceRatio.length-1].ratio > priceRatio[0].ratio ? 'positive' : 'negative'
+                  }`}>
+                    {priceRatio.length > 1 ? (
+                      ((priceRatio[priceRatio.length-1].ratio - priceRatio[0].ratio) / 
+                      priceRatio[0].ratio * 100).toFixed(2)
+                    ) : '0.00'}%
+                    <span className="change-arrow">
+                      {priceRatio[priceRatio.length-1].ratio > priceRatio[0].ratio ? '↑' : '↓'}
+                    </span>
+                  </p>
+                  <p className="change-period">24h change</p>
+                </div>
+              )}
+            </div>
+            <div className="ratio-explanation">
+              <div className="explanation-icon">ℹ️</div>
+              <p>Higher values indicate ETH is gaining value relative to BTC</p>
+            </div>
+          </div>
+          
+          {/* Price comparison */}
+          <div className="ratio-price-comparison">
+            <div className="price-item btc">
+              <img src="https://assets.coingecko.com/coins/images/1/small/bitcoin.png" alt="BTC" className="crypto-icon" />
+              <div className="price-details">
+                <p className="price-label">BTC</p>
+                <p className="price-value">${btcData ? btcData.current_price.toLocaleString() : '0'}</p>
+              </div>
+            </div>
+            <div className="ratio-divider">÷</div>
+            <div className="price-item eth">
+              <img src="https://assets.coingecko.com/coins/images/279/small/ethereum.png" alt="ETH" className="crypto-icon" />
+              <div className="price-details">
+                <p className="price-label">ETH</p>
+                <p className="price-value">${ethData ? ethData.current_price.toLocaleString() : '0'}</p>
+              </div>
+            </div>
+            <div className="ratio-equals">=</div>
+            <div className="ratio-result">
+              <p className="result-value">{currentRatio}</p>
+            </div>
+          </div>
+          
           {priceRatio.length > 1 && (
-            <Line
-              data={{
-                labels: priceRatio.map(item => item.date),
-                datasets: [
-                  {
-                    label: 'BTC/ETH Ratio',
-                    data: priceRatio.map(item => item.ratio),
-                    fill: false,
-                    backgroundColor: 'rgb(75, 192, 192)',
-                    borderColor: 'rgba(75, 192, 192, 0.2)',
+            <div className="ratio-chart-container">
+              <Line
+                data={{
+                  labels: priceRatio.map(item => {
+                    const date = new Date(item.timestamp || new Date()); 
+                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  }),
+                  datasets: [
+                    {
+                      label: 'ETH/BTC Ratio',
+                      data: priceRatio.map(item => item.ratio),
+                      fill: {
+                        target: 'origin',
+                        above: 'rgba(46, 204, 113, 0.1)',   // Green tint above the line
+                      },
+                      backgroundColor: '#2ecc71',
+                      borderColor: '#2ecc71',
+                      borderWidth: 2,
+                      pointRadius: 0,
+                      pointHoverRadius: 5,
+                      pointHoverBackgroundColor: '#2ecc71',
+                      pointHoverBorderColor: '#fff',
+                      pointHoverBorderWidth: 2,
+                      tension: 0.4,
+                      // Store original data for tooltip
+                      btcPrices: priceRatio.map(item => item.btcPrice),
+                      ethPrices: priceRatio.map(item => item.ethPrice),
+                    },
+                  ],
+                }}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  interaction: {
+                    mode: 'index',
+                    intersect: false,
                   },
-                ],
-              }}
-              options={{
-                scales: {
-                  y: {
-                    beginAtZero: false,
+                  plugins: {
+                    legend: {
+                      display: false
+                    },
+                    tooltip: {
+                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                      titleColor: '#666',
+                      bodyColor: '#666',
+                      borderColor: '#ddd',
+                      borderWidth: 1,
+                      padding: 12,
+                      displayColors: false,
+                      callbacks: {
+                        title: (context) => {
+                          return `ETH/BTC Ratio at ${context[0].label}`;
+                        },
+                        label: (context) => {
+                          const ratio = context.raw.toFixed(4);
+                          const ethPrice = context.dataset.ethPrices[context.dataIndex].toLocaleString();
+                          const btcPrice = context.dataset.btcPrices[context.dataIndex].toLocaleString();
+                          
+                          // Calculate percentage difference from current
+                          const currentValue = priceRatio[priceRatio.length-1].ratio;
+                          const pointValue = context.raw;
+                          const percentDiff = ((pointValue - currentValue) / currentValue * 100).toFixed(2);
+                          const diffPrefix = percentDiff > 0 ? '+' : '';
+                          
+                          return [
+                            `Ratio: ${ratio}`,
+                            `ETH: $${ethPrice}`,
+                            `BTC: $${btcPrice}`,
+                            `${diffPrefix}${percentDiff}% from current`
+                          ];
+                        }
+                      }
+                    }
                   },
-                },
-              }}
-            />
+                  scales: {
+                    x: {
+                      grid: {
+                        display: false,
+                        drawBorder: false
+                      },
+                      ticks: {
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 8,
+                        padding: 8,
+                        font: {
+                          size: 11
+                        },
+                        color: '#666'
+                      }
+                    },
+                    y: {
+                      position: 'right',
+                      grid: {
+                        color: (context) => {
+                          // Highlight the zero line
+                          if (context.tick && context.tick.value === 0) {
+                            return 'rgba(0, 0, 0, 0.2)';
+                          }
+                          return 'rgba(0, 0, 0, 0.05)';
+                        },
+                        lineWidth: (context) => {
+                          if (context.tick && context.tick.value === 0) {
+                            return 2;
+                          }
+                          return 1;
+                        }
+                      },
+                      ticks: {
+                        padding: 8,
+                        callback: value => value.toFixed(4),
+                        font: {
+                          size: 11
+                        },
+                        color: '#666'
+                      }
+                    }
+                  }
+                }}
+              />
+            </div>
           )}
+          
+          {/* Historical ratio stats */}
+          <div className="ratio-stats">
+            <div className="stat-item">
+              <p className="stat-label">24h High</p>
+              <p className="stat-value">
+                {priceRatio.length > 0 ? 
+                  Math.max(...priceRatio.map(item => item.ratio)).toFixed(4) : 
+                  '0.0000'}
+              </p>
+            </div>
+            <div className="stat-item">
+              <p className="stat-label">24h Low</p>
+              <p className="stat-value">
+                {priceRatio.length > 0 ? 
+                  Math.min(...priceRatio.map(item => item.ratio)).toFixed(4) : 
+                  '0.0000'}
+              </p>
+            </div>
+            <div className="stat-item">
+              <p className="stat-label">24h Avg</p>
+              <p className="stat-value">
+                {priceRatio.length > 0 ? 
+                  (priceRatio.reduce((sum, item) => sum + item.ratio, 0) / priceRatio.length).toFixed(4) : 
+                  '0.0000'}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

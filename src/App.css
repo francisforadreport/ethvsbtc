@@ -920,3 +920,216 @@ h2 {
     min-width: 600px;
   }
 }
+
+/* ETH/BTC Ratio Section Styles */
+.price-ratio {
+  margin-bottom: 30px;
+}
+
+.ratio-card {
+  background-color: white;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.ratio-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.current-ratio-container {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.ratio-main-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.current-ratio-label {
+  font-size: 16px;
+  color: #666;
+  margin: 0;
+}
+
+.current-ratio-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.ratio-change-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ratio-change {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.change-arrow {
+  font-size: 18px;
+}
+
+.positive {
+  color: #2ecc71;
+}
+
+.negative {
+  color: #e74c3c;
+}
+
+.change-period {
+  font-size: 12px;
+  color: #999;
+  margin: 0;
+}
+
+.ratio-explanation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(46, 204, 113, 0.1);
+  padding: 8px 12px;
+  border-radius: 6px;
+  max-width: 350px;
+}
+
+.explanation-icon {
+  font-size: 16px;
+}
+
+.ratio-explanation p {
+  font-size: 13px;
+  color: #666;
+  margin: 0;
+}
+
+/* Price comparison section */
+.ratio-price-comparison {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin: 20px 0;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.price-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.price-item .crypto-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.price-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.price-label {
+  font-size: 12px;
+  color: #666;
+  margin: 0;
+}
+
+.price-value {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.ratio-divider, .ratio-equals {
+  font-size: 20px;
+  color: #999;
+}
+
+.ratio-result {
+  background-color: #2ecc71;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.result-value {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Chart container */
+.ratio-chart-container {
+  height: 300px;
+  margin: 20px 0;
+}
+
+/* Stats section */
+.ratio-stats {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .ratio-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+  
+  .ratio-explanation {
+    max-width: 100%;
+  }
+  
+  .ratio-price-comparison {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .ratio-stats {
+    flex-wrap: wrap;
+    gap: 15px;
+  }
+}
