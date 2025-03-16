@@ -1565,7 +1565,7 @@ function App() {
             <div className="reserves-card">
               <div className="reserves-header">
                 <img src="https://assets.coingecko.com/coins/images/1/small/bitcoin.png" alt="BTC" className="crypto-icon" />
-                <h3>Bitcoin</h3>
+              <h3>Bitcoin</h3>
               </div>
               <p>{exchangeReserves.bitcoin ? Number(exchangeReserves.bitcoin).toLocaleString(undefined, {maximumFractionDigits: 2}) : '0'} BTC</p>
               <span className="reserves-note">Based on 24h volume</span>
