@@ -501,17 +501,17 @@ h2 {
   background: white;
   border-radius: 12px;
   padding: 24px;
-  margin: 20px 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .combined-chart-section .chart-container {
-  height: 400px;
-  margin-top: 20px;
-  padding: 20px;
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #eee;
+  flex: 1;
+  min-height: 400px;
+  margin: 0;
+  padding: 20px 0;
 }
 
 .combined-chart-section .section-header {
@@ -530,8 +530,7 @@ h2 {
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .combined-chart-section .chart-container {
-    height: 300px;
-    padding: 10px;
+    min-height: 300px;
   }
   
   .combined-chart-section {
@@ -1131,5 +1130,415 @@ h2 {
   .ratio-stats {
     flex-wrap: wrap;
     gap: 15px;
+  }
+}
+
+/* Smooth transitions for data updates */
+.dashboard * {
+  transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
+}
+
+/* Prevent flickering on chart updates */
+.chart-container canvas {
+  will-change: contents;
+}
+
+/* Smooth transitions for price and value changes */
+.price, .price-value, .current-ratio-value, .stat-value, .reserves-card p {
+  transition: color 0.3s ease, text-shadow 0.3s ease;
+}
+
+/* Highlight updated values without causing layout shifts */
+@keyframes subtle-highlight {
+  0% { text-shadow: 0 0 0 transparent; }
+  50% { text-shadow: 0 0 8px rgba(52, 152, 219, 0.3); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
+
+.data-update {
+  animation: subtle-highlight 1.5s ease-out;
+}
+
+/* Smooth transitions for bars */
+.buy-pressure, .sell-pressure, .buy-bar, .sell-bar {
+  transition: width 0.8s ease-in-out, background-color 0.3s ease;
+}
+
+/* Prevent layout shifts during loading */
+.loading-section {
+  min-height: 200px;
+  position: relative;
+}
+
+/* Improve loading overlay to be less jarring */
+.loading-overlay {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.loading-section .loading-overlay {
+  opacity: 1;
+}
+
+/* Ensure charts maintain size during updates */
+.ratio-chart-container, .etf-flow-chart, .chart-container {
+  contain: strict;
+  contain-intrinsic-size: 100% 300px;
+}
+
+/* Prevent content jumps during data updates */
+.crypto-card, .reserves-card, .futures-card, .ratio-card {
+  contain: content;
+  min-height: 100px;
+}
+
+/* Improve animation performance */
+.dashboard {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Chart rendering optimizations */
+.chart-wrapper {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  contain: strict;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Prevent layout shifts during chart updates */
+.chart-container {
+  position: relative;
+  height: 200px;
+  margin-top: 15px;
+  contain: layout size;
+  contain-intrinsic-size: 100% 200px;
+}
+
+.ratio-chart-container, 
+.etf-flow-chart, 
+.pressure-chart-container canvas {
+  contain: layout size;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Optimize rendering performance */
+.dashboard {
+  contain: content;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Prevent content jumps during data updates */
+.crypto-card, 
+.reserves-card, 
+.futures-card, 
+.ratio-card {
+  contain: content;
+  min-height: 100px;
+  transform: translateZ(0);
+}
+
+/* Improve loading overlay to be less jarring */
+.loading-overlay {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.loading-section .loading-overlay {
+  opacity: 1;
+}
+
+/* Optimize transitions for smoother updates */
+.price, 
+.price-value, 
+.current-ratio-value, 
+.stat-value, 
+.reserves-card p {
+  transition: color 0.3s ease;
+  will-change: contents;
+}
+
+/* Optimize bar transitions */
+.buy-pressure, 
+.sell-pressure, 
+.buy-bar, 
+.sell-bar {
+  transition: width 0.8s ease-in-out;
+  will-change: width;
+}
+
+/* Remove transitions that might cause flickering */
+.dashboard * {
+  transition: none;
+}
+
+/* Only apply specific transitions where needed */
+.positive, 
+.negative, 
+.range-button, 
+.timeframe-button {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Prevent text layout shifts */
+.price, 
+.price-change, 
+.market-cap, 
+.market-cap-change,
+.current-ratio-value,
+.ratio-change,
+.stat-value {
+  min-height: 1.2em;
+}
+
+/* Optimize rendering for chart containers */
+.combined-chart-section .chart-container,
+.crypto-card .chart-container,
+.ratio-chart-container,
+.etf-flow-chart {
+  isolation: isolate;
+  contain: strict;
+  will-change: contents;
+}
+
+/* Prevent FOUC (Flash of Unstyled Content) */
+.dashboard {
+  opacity: 0;
+  animation: fade-in 0.3s ease-in forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Optimize for GPU rendering */
+.chart-container canvas,
+.pressure-chart-container canvas,
+.ratio-chart-container canvas,
+.etf-flow-chart canvas {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Empty chart state */
+.empty-chart {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-size: 14px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+}
+
+/* Optimize chart rendering */
+.chart-wrapper {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  contain: layout style;
+  transform: translateZ(0);
+}
+
+/* Reduce CSS transitions to minimum necessary */
+.dashboard * {
+  transition: none;
+}
+
+/* Only apply transitions to specific elements */
+.range-button, 
+.timeframe-button, 
+.tab-button {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.positive, 
+.negative {
+  transition: color 0.2s ease;
+}
+
+.loading-overlay {
+  transition: opacity 0.2s ease;
+}
+
+/* Prevent layout shifts */
+.chart-container {
+  min-height: 200px;
+  position: relative;
+  contain: layout size;
+}
+
+/* Improve chart performance */
+canvas {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Update the chart-news-container styles */
+.chart-news-container {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin: 20px 0;
+  min-height: 500px;
+}
+
+.combined-chart-section {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.combined-chart-section .chart-container {
+  flex: 1;
+  min-height: 400px;
+  margin: 0;
+  padding: 20px 0;
+}
+
+.crypto-news {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  min-height: 500px;
+}
+
+.news-header {
+  margin-bottom: 16px;
+}
+
+.news-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.news-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.news-item {
+  display: flex;
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.2s;
+  gap: 12px;
+}
+
+.news-item:hover {
+  background-color: #f8f9fa;
+}
+
+.news-image {
+  width: 80px;
+  height: 60px;
+  flex-shrink: 0;
+  background: #f8f9fa;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.news-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.news-content {
+  flex: 1;
+  min-width: 0; /* Ensures text truncation works */
+}
+
+.news-content h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: #2c3e50;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.news-meta {
+  display: flex;
+  font-size: 0.8rem;
+  color: #666;
+  gap: 12px;
+}
+
+.news-source {
+  color: #3498db;
+  font-weight: 500;
+}
+
+.news-error {
+  color: #666;
+  text-align: center;
+  padding: 20px;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Improve scrollbar styling */
+.news-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.news-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.news-list::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+.news-list::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .chart-news-container {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .crypto-news {
+    height: 400px;
+  }
+
+  .combined-chart-section .chart-container {
+    min-height: 300px;
   }
 }

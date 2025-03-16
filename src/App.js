@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import axios from 'axios';
 import './App.css';
 import { Line, Bar } from 'react-chartjs-2';
@@ -27,7 +27,7 @@ const axiosWithRetry = async (url, options = {}, retries = 3, delay = 1000) => {
 };
 
 // Add this new component before the App component
-const ETFFlowsSection = () => {
+const ETFFlowsSection = ({ etfData, isLoading, dataFreshness }) => {
   const [viewMode, setViewMode] = useState('chart');
   const [selectedTimeRange, setSelectedTimeRange] = useState('24h');
   const [etfHistoricalData, setEtfHistoricalData] = useState({
@@ -35,8 +35,15 @@ const ETFFlowsSection = () => {
     ethereum: []
   });
 
-  // Generate mock historical data
+  // Generate mock historical data - use provided data if available
   useEffect(() => {
+    // If we have data from the parent component, use it
+    if (etfData) {
+      setEtfHistoricalData(etfData);
+      return;
+    }
+
+    // Otherwise, generate mock data as before
     const generateMockData = (timeRange) => {
       const dataPoints = {
         '24h': 24,
@@ -76,7 +83,7 @@ const ETFFlowsSection = () => {
       bitcoin: btcData,
       ethereum: ethData
     });
-  }, [selectedTimeRange]);
+  }, [selectedTimeRange, etfData]);
 
   const formatCurrency = (value) => {
     if (Math.abs(value) >= 1e9) {
@@ -98,6 +105,12 @@ const ETFFlowsSection = () => {
       }
       return date.toLocaleDateString([], { year: '2-digit', month: 'numeric' });
     };
+
+    // Early return if data is not available
+    if (!etfHistoricalData.bitcoin || etfHistoricalData.bitcoin.length === 0 ||
+        !etfHistoricalData.ethereum || etfHistoricalData.ethereum.length === 0) {
+      return <div className="empty-chart">No ETF flow data available</div>;
+    }
 
     return (
       <div className="etf-flow-chart">
@@ -164,6 +177,7 @@ const ETFFlowsSection = () => {
           options={{
             responsive: true,
             maintainAspectRatio: false,
+            animation: false, // Disable animations to prevent flickering
             interaction: {
               mode: 'index',
               intersect: false,
@@ -220,13 +234,16 @@ const ETFFlowsSection = () => {
 
   const ETFFlowTable = () => {
     const getLatestData = (data) => {
+      if (!data || data.length === 0) return { inflow: 0, outflow: 0, netFlow: 0 };
       return data[data.length - 1];
     };
 
     const calculateChange = (data) => {
-      if (data.length < 2) return 0;
+      if (!data || data.length < 2) return 0;
       const latest = data[data.length - 1].netFlow;
       const previous = data[0].netFlow;
+      // Avoid division by zero
+      if (previous === 0) return latest > 0 ? 100 : latest < 0 ? -100 : 0;
       return ((latest - previous) / Math.abs(previous)) * 100;
     };
 
@@ -317,13 +334,448 @@ const ETFFlowsSection = () => {
             ))}
           </div>
         </div>
+        {dataFreshness && <DataFreshness timestamp={dataFreshness} />}
       </div>
-      <div className="etf-flows-content">
+      <div className={`etf-flows-content ${isLoading ? 'loading-section' : ''}`}>
+        {isLoading && <LoadingOverlay />}
         {viewMode === 'chart' ? <ETFFlowChart /> : <ETFFlowTable />}
       </div>
     </div>
   );
 };
+
+// Move component definitions outside of the App component to prevent recreation on each render
+// Memoize the DataFreshness component
+const DataFreshness = memo(({ timestamp }) => (
+  <div className="data-freshness">
+    Last updated: {timestamp || 'Never'}
+  </div>
+));
+
+// Memoize the LoadingOverlay component
+const LoadingOverlay = memo(() => (
+  <div className="loading-overlay">
+    <div className="loading-spinner"></div>
+  </div>
+));
+
+// Memoize the TimeRangeSelector component
+const TimeRangeSelector = memo(({ activeRange, onRangeChange }) => (
+  <div className="time-range-selector">
+    {['24h', '7d', '1m', 'all'].map(range => (
+      <button
+        key={range}
+        className={`range-button ${activeRange === range ? 'active' : ''}`}
+        onClick={() => onRangeChange(range)}
+      >
+        {range}
+      </button>
+    ))}
+  </div>
+));
+
+// Memoize the CryptoChart component with proper dependencies
+const CryptoChart = memo(({ data, symbol, timeRange }) => {
+  // Always declare hooks at the top level, before any conditional logic
+  const chartRef = useRef(null);
+
+  const calculateRelativeChanges = useCallback((prices) => {
+    if (!prices || prices.length === 0) return [];
+    const initialPrice = prices[0];
+    return prices.map(price => ((price - initialPrice) / initialPrice) * 100);
+  }, []);
+
+  const formatDate = useCallback((date) => {
+    if (!date) return '';
+    if (timeRange === '24h') {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    if (timeRange === '7d') {
+      return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+    }
+    if (timeRange === '1m') {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    if (timeRange === 'all') {
+      return date.toLocaleDateString([], { 
+        year: '2-digit',
+        month: 'numeric'
+      });
+    }
+    return date.toLocaleDateString();
+  }, [timeRange]);
+
+  // Safe data access with default values
+  const prices = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    return data.map(item => item.price);
+  }, [data]);
+  
+  const relativeChanges = useMemo(() => 
+    calculateRelativeChanges(prices), 
+  [calculateRelativeChanges, prices]);
+
+  // Calculate y-axis range with padding
+  const { minValue, maxValue, range, padding } = useMemo(() => {
+    if (relativeChanges.length === 0) {
+      return { minValue: 0, maxValue: 0, range: 0, padding: 0 };
+    }
+    const min = Math.floor(Math.min(...relativeChanges));
+    const max = Math.ceil(Math.max(...relativeChanges));
+    const r = max - min;
+    const p = r * 0.1;
+    return { minValue: min, maxValue: max, range: r, padding: p };
+  }, [relativeChanges]);
+
+  const color = symbol === 'BTC' ? '#f1c40f' : '#2ecc71';
+  
+  // Memoize chart data to prevent unnecessary recalculations
+  const chartData = useMemo(() => {
+    if (!data || data.length === 0) {
+      return {
+        labels: [],
+        datasets: [{
+          label: symbol,
+          data: [],
+          borderColor: color,
+          backgroundColor: color,
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 2
+        }]
+      };
+    }
+    
+    return {
+      labels: data.map(item => formatDate(item.time)),
+      datasets: [
+        {
+          label: symbol,
+          data: relativeChanges,
+          borderColor: color,
+          backgroundColor: color,
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 2
+        }
+      ]
+    };
+  }, [data, formatDate, relativeChanges, symbol, color]);
+  
+  // Memoize chart options to prevent unnecessary recalculations
+  const chartOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false, // Disable animations to prevent flickering
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        display: false
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        padding: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        borderColor: '#ddd',
+        borderWidth: 1,
+        titleColor: '#666',
+        bodyColor: '#666',
+        titleFont: {
+          size: 11,
+          weight: 'normal'
+        },
+        bodyFont: {
+          size: 11
+        },
+        callbacks: {
+          label: (context) => {
+            const value = context.raw.toFixed(2);
+            return `${symbol}: ${value}%`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        display: true,
+        grid: {
+          display: false,
+          drawBorder: false
+        },
+        ticks: {
+          maxRotation: 0,
+          minRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 6,
+          padding: 8,
+          font: {
+            size: 10
+          },
+          color: '#666'
+        }
+      },
+      y: {
+        position: 'right',
+        min: minValue - padding,
+        max: maxValue + padding,
+        grid: {
+          color: 'rgba(0, 0, 0, 0.05)',
+          drawBorder: false
+        },
+        ticks: {
+          padding: 8,
+          stepSize: Math.ceil(range || 1) / 4,
+          callback: value => `${value.toFixed(1)}%`,
+          font: {
+            size: 10
+          },
+          color: '#666'
+        }
+      }
+    }
+  }), [minValue, maxValue, range, padding, symbol]);
+
+  // Early return after hooks
+  if (!data || data.length === 0) {
+    return <div className="chart-wrapper empty-chart">No data available</div>;
+  }
+
+  return (
+    <div className="chart-wrapper">
+      <Line
+        ref={chartRef}
+        data={chartData}
+        options={chartOptions}
+        redraw={false}
+      />
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison function for memo
+  // Only re-render if data length changes significantly or timeRange changes
+  if (prevProps.timeRange !== nextProps.timeRange) return false;
+  if (!prevProps.data || !nextProps.data) return false;
+  if (Math.abs((prevProps.data?.length || 0) - (nextProps.data?.length || 0)) > 5) return false;
+  
+  // Check if the last data point has changed significantly
+  if (prevProps.data?.length > 0 && nextProps.data?.length > 0) {
+    const prevLast = prevProps.data[prevProps.data.length - 1];
+    const nextLast = nextProps.data[nextProps.data.length - 1];
+    if (Math.abs(prevLast.price - nextLast.price) / prevLast.price > 0.005) return false; // 0.5% change
+  }
+  
+  return true; // Don't re-render for small changes
+});
+
+// Memoize the CombinedCryptoChart component with proper dependencies
+const CombinedCryptoChart = memo(({ btcData, ethData, timeRange }) => {
+  // Always declare hooks at the top level, before any conditional logic
+  const chartRef = useRef(null);
+
+  const calculateRelativeChanges = useCallback((prices) => {
+    if (!prices || prices.length === 0) return [];
+    const initialPrice = prices[0];
+    return prices.map(price => ((price - initialPrice) / initialPrice) * 100);
+  }, []);
+
+  const formatDate = useCallback((date) => {
+    if (!date) return '';
+    if (timeRange === '24h') {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    if (timeRange === '7d') {
+      return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+    }
+    if (timeRange === '1m') {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    if (timeRange === 'all') {
+      return date.toLocaleDateString([], { 
+        year: '2-digit',
+        month: 'numeric'
+      });
+    }
+    return date.toLocaleDateString();
+  }, [timeRange]);
+
+  // Safe data access with default values
+  const btcPrices = useMemo(() => {
+    if (!btcData || btcData.length === 0) return [];
+    return btcData.map(item => item.price);
+  }, [btcData]);
+  
+  const ethPrices = useMemo(() => {
+    if (!ethData || ethData.length === 0) return [];
+    return ethData.map(item => item.price);
+  }, [ethData]);
+  
+  const btcChanges = useMemo(() => 
+    calculateRelativeChanges(btcPrices), 
+  [calculateRelativeChanges, btcPrices]);
+  
+  const ethChanges = useMemo(() => 
+    calculateRelativeChanges(ethPrices), 
+  [calculateRelativeChanges, ethPrices]);
+
+  // Calculate y-axis range with padding
+  const { minValue, maxValue, range, padding } = useMemo(() => {
+    const allChanges = [...btcChanges, ...ethChanges];
+    if (allChanges.length === 0) {
+      return { minValue: 0, maxValue: 0, range: 0, padding: 0 };
+    }
+    const min = Math.floor(Math.min(...allChanges));
+    const max = Math.ceil(Math.max(...allChanges));
+    const r = max - min;
+    const p = r * 0.1;
+    return { minValue: min, maxValue: max, range: r, padding: p };
+  }, [btcChanges, ethChanges]);
+
+  // Memoize chart data to prevent unnecessary recalculations
+  const chartData = useMemo(() => {
+    if (!btcData || !ethData || btcData.length === 0 || ethData.length === 0) {
+      return {
+        labels: [],
+        datasets: []
+      };
+    }
+    
+    return {
+      labels: btcData.map(item => formatDate(item.time)),
+      datasets: [
+        {
+          label: 'BTC',
+          data: btcChanges,
+          borderColor: '#f1c40f',
+          backgroundColor: '#f1c40f',
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 2,
+          realData: btcPrices
+        },
+        {
+          label: 'ETH',
+          data: ethChanges,
+          borderColor: '#2ecc71',
+          backgroundColor: '#2ecc71',
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 2,
+          realData: ethPrices
+        }
+      ]
+    };
+  }, [btcData, ethData, formatDate, btcChanges, ethChanges, btcPrices, ethPrices]);
+  
+  // Memoize chart options to prevent unnecessary recalculations
+  const chartOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false, // Disable animations to prevent flickering
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        labels: {
+          usePointStyle: true,
+          padding: 20,
+          font: {
+            size: 12
+          }
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        padding: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        borderColor: '#ddd',
+        borderWidth: 1,
+        titleColor: '#666',
+        bodyColor: '#666',
+        titleFont: {
+          size: 12,
+          weight: 'normal'
+        },
+        bodyFont: {
+          size: 12
+        },
+        callbacks: {
+          label: (context) => {
+            const price = context.dataset.realData?.[context.dataIndex] || 0;
+            const change = context.raw.toFixed(2);
+            return `${context.dataset.label}: $${price.toLocaleString()} (${change}%)`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        display: true,
+        grid: {
+          display: false,
+          drawBorder: false
+        },
+        ticks: {
+          maxRotation: 0,
+          minRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 6,
+          padding: 8,
+          font: {
+            size: 11
+          },
+          color: '#666'
+        }
+      },
+      y: {
+        position: 'right',
+        min: minValue - padding,
+        max: maxValue + padding,
+        grid: {
+          color: 'rgba(0, 0, 0, 0.05)',
+          drawBorder: false
+        },
+        ticks: {
+          padding: 8,
+          stepSize: Math.ceil(range || 1) / 4,
+          callback: value => `${value.toFixed(1)}%`,
+          font: {
+            size: 11
+          },
+          color: '#666'
+        }
+      }
+    }
+  }), [minValue, maxValue, range, padding]);
+
+  // Early return after hooks
+  if (!btcData || !ethData || btcData.length === 0 || ethData.length === 0) {
+    return <div className="chart-wrapper empty-chart">No data available</div>;
+  }
+
+  return (
+    <div className="chart-wrapper">
+      <Line
+        ref={chartRef}
+        data={chartData}
+        options={chartOptions}
+        redraw={false}
+      />
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Similar custom comparison as CryptoChart
+  if (prevProps.timeRange !== nextProps.timeRange) return false;
+  return true; // Only re-render on timeRange change
+});
 
 function App() {
   const [cryptoData, setCryptoData] = useState(null);
@@ -335,7 +787,6 @@ function App() {
   });
   const [marketPressure, setMarketPressure] = useState(null);
   const [exchangeReserves, setExchangeReserves] = useState(null);
-  const [etfFlows, setEtfFlows] = useState(null);
   const [priceRatio, setPriceRatio] = useState([]);
   const [error, setError] = useState(null);
   const [dataFreshness, setDataFreshness] = useState({});
@@ -344,269 +795,335 @@ function App() {
     bitcoin: [],
     ethereum: []
   });
+  const [etfData, setEtfData] = useState(null);
+  const [etfLoading, setEtfLoading] = useState(false);
+  const [newsData, setNewsData] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(true);
 
-    // Function to fetch basic crypto data from Binance
-    const fetchCryptoData = async () => {
-      try {
+  // Use useRef for data that shouldn't trigger re-renders
+  const dataCache = useRef({
+    historicalBtc: [],
+    historicalEth: []
+  });
+
+  // Function to fetch basic crypto data from Binance
+  const fetchCryptoData = useCallback(async () => {
+    try {
       setLoading(prev => ({ ...prev, prices: true }));
-        const [btcResponse, ethResponse] = await Promise.all([
-          axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'),
-          axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT')
-        ]);
+      const [btcResponse, ethResponse] = await Promise.all([
+        axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'),
+        axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT')
+      ]);
 
-        // Update data freshness
-        setDataFreshness(prev => ({
-          ...prev,
-          prices: new Date().toLocaleTimeString()
-        }));
+      // Update data freshness
+      setDataFreshness(prev => ({
+        ...prev,
+        prices: new Date().toLocaleTimeString()
+      }));
 
-        // Transform the data to match our expected format
-        const transformedData = [
-          {
-            id: 'bitcoin',
-            name: 'Bitcoin',
-            symbol: 'BTC',
-            current_price: parseFloat(btcResponse.data.lastPrice),
-            price_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
-            market_cap: parseFloat(btcResponse.data.quoteVolume),
-            market_cap_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
-            image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
-          },
-          {
-            id: 'ethereum',
-            name: 'Ethereum',
-            symbol: 'ETH',
-            current_price: parseFloat(ethResponse.data.lastPrice),
-            price_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
-            market_cap: parseFloat(ethResponse.data.quoteVolume),
-            market_cap_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
-            image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png'
-          }
-        ];
+      // Transform the data to match our expected format
+      const transformedData = [
+        {
+          id: 'bitcoin',
+          name: 'Bitcoin',
+          symbol: 'BTC',
+          current_price: parseFloat(btcResponse.data.lastPrice),
+          price_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
+          market_cap: parseFloat(btcResponse.data.quoteVolume),
+          market_cap_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
+          image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+        },
+        {
+          id: 'ethereum',
+          name: 'Ethereum',
+          symbol: 'ETH',
+          current_price: parseFloat(ethResponse.data.lastPrice),
+          price_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
+          market_cap: parseFloat(ethResponse.data.quoteVolume),
+          market_cap_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
+          image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png'
+        }
+      ];
 
-        setCryptoData(transformedData);
-        
-        // Calculate ETH/BTC ratio (not BTC/ETH)
-        const btcPrice = parseFloat(btcResponse.data.lastPrice);
-        const ethPrice = parseFloat(ethResponse.data.lastPrice);
-        const ratio = ethPrice / btcPrice; // ETH/BTC ratio
-        
-        // Store timestamp for better x-axis display
-        const timestamp = new Date();
-        
-        setPriceRatio(prev => {
-          const newData = [...prev, { 
-            date: timestamp.toLocaleTimeString(), 
-            ratio,
-            timestamp,
-            btcPrice,
-            ethPrice
-          }];
-          return newData.slice(-288); // Keep last 24 hours (288 = 24h * 12 updates per hour)
-        });
+      setCryptoData(transformedData);
+      
+      // Calculate ETH/BTC ratio (not BTC/ETH)
+      const btcPrice = parseFloat(btcResponse.data.lastPrice);
+      const ethPrice = parseFloat(ethResponse.data.lastPrice);
+      const ratio = ethPrice / btcPrice; // ETH/BTC ratio
+      
+      // Store timestamp for better x-axis display
+      const timestamp = new Date();
+      
+      setPriceRatio(prev => {
+        const newData = [...prev, { 
+          date: timestamp.toLocaleTimeString(), 
+          ratio,
+          timestamp,
+          btcPrice,
+          ethPrice
+        }];
+        return newData.slice(-288); // Keep last 24 hours (288 = 24h * 12 updates per hour)
+      });
 
       setError(null);
-      } catch (err) {
-        setError(`Failed to fetch crypto data: ${err.message}`);
-        console.error('Binance API Error:', err);
+    } catch (err) {
+      setError(`Failed to fetch crypto data: ${err.message}`);
+      console.error('Binance API Error:', err);
     } finally {
       setLoading(prev => ({ ...prev, prices: false }));
-      }
-    };
+    }
+  }, [setLoading, setDataFreshness, setError, setPriceRatio, setCryptoData]);
 
   // Function to fetch market pressure data
-    const fetchMarketPressure = async () => {
-      try {
-        setLoading(prev => ({ ...prev, pressure: true }));
+  const fetchMarketPressure = useCallback(async () => {
+    try {
+      setLoading(prev => ({ ...prev, pressure: true }));
+      
+      // Fetch current order book data
+      const [btcBook, ethBook] = await Promise.all([
+        axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100'),
+        axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=ETHUSDT&limit=100')
+      ]);
+
+      setDataFreshness(prev => ({
+        ...prev,
+        pressure: new Date().toLocaleTimeString()
+      }));
+
+      // Simplified pressure calculation
+      const calculatePressure = (bookData) => {
+        // Calculate total buy and sell volumes from order book
+        const buyVolume = bookData.bids.reduce((acc, [price, qty]) => 
+          acc + (parseFloat(price) * parseFloat(qty)), 0);
+        const sellVolume = bookData.asks.reduce((acc, [price, qty]) => 
+          acc + (parseFloat(price) * parseFloat(qty)), 0);
         
-        // Fetch current order book data
-        const [btcBook, ethBook] = await Promise.all([
-          axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100'),
-          axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=ETHUSDT&limit=100')
-        ]);
+        // Simple buy/sell ratio converted to percentage
+        const totalVolume = buyVolume + sellVolume;
+        const buyPercentage = (buyVolume / totalVolume) * 100;
+        
+        return {
+          pressure: buyPercentage - 50, // Center around 0 (-50 to +50)
+          buyStrength: buyPercentage,
+          sellStrength: 100 - buyPercentage,
+          totalVolume
+        };
+      };
 
-        setDataFreshness(prev => ({
-          ...prev,
-          pressure: new Date().toLocaleTimeString()
-        }));
-
-        // Simplified pressure calculation
-        const calculatePressure = (bookData) => {
-          // Calculate total buy and sell volumes from order book
-          const buyVolume = bookData.bids.reduce((acc, [price, qty]) => 
-            acc + (parseFloat(price) * parseFloat(qty)), 0);
-          const sellVolume = bookData.asks.reduce((acc, [price, qty]) => 
-            acc + (parseFloat(price) * parseFloat(qty)), 0);
-          
-          // Simple buy/sell ratio converted to percentage
-          const totalVolume = buyVolume + sellVolume;
-          const buyPercentage = (buyVolume / totalVolume) * 100;
-          
-          return {
-            pressure: buyPercentage - 50, // Center around 0 (-50 to +50)
-            buyStrength: buyPercentage,
-            sellStrength: 100 - buyPercentage,
-            totalVolume
-          };
+      // Generate time series data
+      const generateTimeSeriesData = (currentPressure, symbol) => {
+        const now = Date.now();
+        const data = {};
+        
+        // Simplified timeframes
+        const timeframes = {
+          '5m': { points: 30, interval: 5 * 60 * 1000 },  // 30 points for 5 minutes
+          '30m': { points: 30, interval: 30 * 60 * 1000 }, // 30 points for 30 minutes
+          '1h': { points: 30, interval: 60 * 60 * 1000 }   // 30 points for 1 hour
         };
 
-        // Generate time series data
-        const generateTimeSeriesData = (currentPressure, symbol) => {
-          const now = Date.now();
-          const data = {};
-          
-          // Simplified timeframes
-          const timeframes = {
-            '5m': { points: 30, interval: 5 * 60 * 1000 },  // 30 points for 5 minutes
-            '30m': { points: 30, interval: 30 * 60 * 1000 }, // 30 points for 30 minutes
-            '1h': { points: 30, interval: 60 * 60 * 1000 }   // 30 points for 1 hour
+        Object.entries(timeframes).forEach(([timeframe, { points, interval }]) => {
+          const timeframeData = Array.from({ length: points }, (_, i) => {
+            const time = new Date(now - (i * interval));
+            // Smoother randomization
+            const randomFactor = 0.9 + Math.random() * 0.2;
+            const baseValue = currentPressure.pressure * randomFactor;
+            
+            return {
+              time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              pressure: baseValue,
+              buyStrength: currentPressure.buyStrength * randomFactor,
+              sellStrength: currentPressure.sellStrength * randomFactor,
+              totalVolume: currentPressure.totalVolume / points
+            };
+          }).reverse();
+
+          // Simple moving average calculation
+          const calculateMA = (data, period) => {
+            return data.map((_, index) => {
+              if (index < period - 1) return null;
+              const slice = data.slice(index - period + 1, index + 1);
+              return slice.reduce((sum, item) => sum + item.pressure, 0) / period;
+            });
           };
 
-          Object.entries(timeframes).forEach(([timeframe, { points, interval }]) => {
-            const timeframeData = Array.from({ length: points }, (_, i) => {
-              const time = new Date(now - (i * interval));
-              // Smoother randomization
-              const randomFactor = 0.9 + Math.random() * 0.2;
-              const baseValue = currentPressure.pressure * randomFactor;
-              
-              return {
-                time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                pressure: baseValue,
-                buyStrength: currentPressure.buyStrength * randomFactor,
-                sellStrength: currentPressure.sellStrength * randomFactor,
-                totalVolume: currentPressure.totalVolume / points
-              };
-            }).reverse();
-
-            // Simple moving average calculation
-            const calculateMA = (data, period) => {
-              return data.map((_, index) => {
-                if (index < period - 1) return null;
-                const slice = data.slice(index - period + 1, index + 1);
-                return slice.reduce((sum, item) => sum + item.pressure, 0) / period;
-              });
-            };
-
-            // Calculate only MA10 for simplicity
-            const MA10 = calculateMA(timeframeData, 10);
-            timeframeData.forEach((item, i) => {
-              item.MA10 = MA10[i];
-            });
-
-            data[timeframe] = timeframeData;
+          // Calculate only MA10 for simplicity
+          const MA10 = calculateMA(timeframeData, 10);
+          timeframeData.forEach((item, i) => {
+            item.MA10 = MA10[i];
           });
 
-          return data;
-        };
-
-        const btcPressure = calculatePressure(btcBook.data);
-        const ethPressure = calculatePressure(ethBook.data);
-
-        setMarketPressure({
-          bitcoin: {
-            current: btcPressure,
-            timeframes: generateTimeSeriesData(btcPressure, 'BTC')
-          },
-          ethereum: {
-            current: ethPressure,
-            timeframes: generateTimeSeriesData(ethPressure, 'ETH')
-          }
+          data[timeframe] = timeframeData;
         });
 
-      } catch (err) {
-        console.error('Failed to fetch market pressure:', err);
+        return data;
+      };
+
+      const btcPressure = calculatePressure(btcBook.data);
+      const ethPressure = calculatePressure(ethBook.data);
+
+      setMarketPressure({
+        bitcoin: {
+          current: btcPressure,
+          timeframes: generateTimeSeriesData(btcPressure, 'BTC')
+        },
+        ethereum: {
+          current: ethPressure,
+          timeframes: generateTimeSeriesData(ethPressure, 'ETH')
+        }
+      });
+
+    } catch (err) {
+      console.error('Failed to fetch market pressure:', err);
     } finally {
       setLoading(prev => ({ ...prev, pressure: false }));
-      }
-    };
+    }
+  }, [setLoading, setDataFreshness, setMarketPressure]);
 
-    // Function to fetch exchange reserves using CoinGecko's simple endpoint
-    const fetchExchangeReserves = async () => {
+  // Function to fetch exchange reserves using CoinGecko's simple endpoint
+  const fetchExchangeReserves = useCallback(async () => {
+    try {
+      setLoading(prev => ({ ...prev, reserves: true }));
+      
+      // Use CoinGecko's simple coins endpoint
+      const [btcData, ethData] = await Promise.all([
+        axiosWithRetry('https://api.coingecko.com/api/v3/coins/bitcoin'),
+        axiosWithRetry('https://api.coingecko.com/api/v3/coins/ethereum')
+      ]);
+
+      // Extract 24h trading volume and estimate reserves
+      const btcVolume = btcData.data.market_data.total_volume.usd;
+      const ethVolume = ethData.data.market_data.total_volume.usd;
+      
+      // Get current prices
+      const btcPrice = btcData.data.market_data.current_price.usd;
+      const ethPrice = ethData.data.market_data.current_price.usd;
+
+      // Calculate reserves in respective cryptocurrencies
+      // Using 20% of 24h volume as a conservative estimate
+      const btcReserves = (btcVolume * 0.20) / btcPrice;
+      const ethReserves = (ethVolume * 0.20) / ethPrice;
+
+      setExchangeReserves({
+        bitcoin: btcReserves,
+        ethereum: ethReserves
+      });
+
+      setDataFreshness(prev => ({
+        ...prev,
+        reserves: new Date().toLocaleTimeString()
+      }));
+
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch exchange reserves:', err);
+      // Use alternative endpoint if the first one fails
       try {
-        setLoading(prev => ({ ...prev, reserves: true }));
-        
-        // Use CoinGecko's simple coins endpoint
-        const [btcData, ethData] = await Promise.all([
-          axiosWithRetry('https://api.coingecko.com/api/v3/coins/bitcoin'),
-          axiosWithRetry('https://api.coingecko.com/api/v3/coins/ethereum')
+        const [btcMarketData, ethMarketData] = await Promise.all([
+          axiosWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currency=usd&include_24hr_vol=true'),
+          axiosWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currency=usd&include_24hr_vol=true')
         ]);
 
-        // Extract 24h trading volume and estimate reserves
-        const btcVolume = btcData.data.market_data.total_volume.usd;
-        const ethVolume = ethData.data.market_data.total_volume.usd;
-        
-        // Get current prices
-        const btcPrice = btcData.data.market_data.current_price.usd;
-        const ethPrice = ethData.data.market_data.current_price.usd;
-
-        // Calculate reserves in respective cryptocurrencies
-        // Using 20% of 24h volume as a conservative estimate
-        const btcReserves = (btcVolume * 0.20) / btcPrice;
-        const ethReserves = (ethVolume * 0.20) / ethPrice;
+        const btcVolume = btcMarketData.data.bitcoin.usd_24h_vol;
+        const ethVolume = ethMarketData.data.ethereum.usd_24h_vol;
+        const btcPrice = btcMarketData.data.bitcoin.usd;
+        const ethPrice = ethMarketData.data.ethereum.usd;
 
         setExchangeReserves({
-          bitcoin: btcReserves,
-          ethereum: ethReserves
+          bitcoin: (btcVolume * 0.20) / btcPrice,
+          ethereum: (ethVolume * 0.20) / ethPrice
         });
 
         setDataFreshness(prev => ({
           ...prev,
           reserves: new Date().toLocaleTimeString()
         }));
-
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch exchange reserves:', err);
-        // Use alternative endpoint if the first one fails
-        try {
-          const [btcMarketData, ethMarketData] = await Promise.all([
-            axiosWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currency=usd&include_24hr_vol=true'),
-            axiosWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currency=usd&include_24hr_vol=true')
-          ]);
-
-          const btcVolume = btcMarketData.data.bitcoin.usd_24h_vol;
-          const ethVolume = ethMarketData.data.ethereum.usd_24h_vol;
-          const btcPrice = btcMarketData.data.bitcoin.usd;
-          const ethPrice = ethMarketData.data.ethereum.usd;
-
-          setExchangeReserves({
-            bitcoin: (btcVolume * 0.20) / btcPrice,
-            ethereum: (ethVolume * 0.20) / ethPrice
-          });
-
-          setDataFreshness(prev => ({
-            ...prev,
-            reserves: new Date().toLocaleTimeString()
-          }));
-        } catch (fallbackErr) {
-          console.error('Failed to fetch fallback exchange data:', fallbackErr);
-          // Use static fallback values if both attempts fail
-          setExchangeReserves({
-            bitcoin: 10000,
-            ethereum: 100000
-          });
-        }
-      } finally {
-        setLoading(prev => ({ ...prev, reserves: false }));
+      } catch (fallbackErr) {
+        console.error('Failed to fetch fallback exchange data:', fallbackErr);
+        // Use static fallback values if both attempts fail
+        setExchangeReserves({
+          bitcoin: 10000,
+          ethereum: 100000
+        });
       }
-    };
+    } finally {
+      setLoading(prev => ({ ...prev, reserves: false }));
+    }
+  }, [setLoading, setDataFreshness, setExchangeReserves, setError]);
 
-    // Function to fetch ETF flows - using mock data as Binance doesn't provide ETF data
-    const fetchEtfFlows = async () => {
-      // Keep the existing mock ETF data as is
-      setEtfFlows({
-        bitcoin: {
-          inflow: 250000000,
-          outflow: 150000000,
-          net: 100000000
-        },
-        ethereum: {
-          inflow: 120000000,
-          outflow: 80000000,
-          net: 40000000
-        }
+  // Function to generate mock ETF data with more realistic patterns
+  const generateMockEtfData = (timeRange) => {
+    const dataPoints = {
+      '24h': 24,
+      '7d': 7,
+      '1m': 30,
+      'all': 90
+    }[timeRange] || 24;
+
+    const now = new Date();
+    const data = [];
+    
+    // Create a base trend that's somewhat realistic
+    const trendDirection = Math.random() > 0.5 ? 1 : -1; // Random trend direction
+    const trendStrength = Math.random() * 0.2 + 0.1; // Random trend strength
+    
+    for (let i = dataPoints; i >= 0; i--) {
+      const date = new Date(now);
+      date.setHours(now.getHours() - i);
+      
+      // Create some cyclical patterns
+      const timeOfDay = date.getHours();
+      const dayFactor = (timeOfDay > 9 && timeOfDay < 16) ? 1.2 : 0.8; // More activity during business hours
+      
+      // Add some randomness but maintain the trend
+      const trendFactor = 1 + (trendDirection * trendStrength * (dataPoints - i) / dataPoints);
+      const randomFactor = 0.7 + Math.random() * 0.6;
+      
+      // Base values with some randomness
+      const baseInflow = 300000000 * randomFactor * dayFactor * trendFactor;
+      const baseOutflow = 250000000 * randomFactor * dayFactor;
+      
+      data.push({
+        date,
+        inflow: baseInflow,
+        outflow: baseOutflow,
+        netFlow: baseInflow - baseOutflow,
+        price: 40000 + (Math.random() * 5000 * trendFactor)
       });
-    };
+    }
+
+    return data;
+  };
+
+  // Function to fetch ETF flows - using mock data as Binance doesn't provide ETF data
+  const fetchEtfFlows = useCallback(async () => {
+    try {
+      setEtfLoading(true);
+      
+      // Generate different data for BTC and ETH
+      const btcData = generateMockEtfData(timeRange);
+      const ethData = generateMockEtfData(timeRange);
+      
+      // Store both datasets
+      setEtfData({
+        bitcoin: btcData,
+        ethereum: ethData
+      });
+      
+      setEtfLoading(false);
+      setDataFreshness(prev => ({
+        ...prev,
+        etf: new Date().toLocaleTimeString()
+      }));
+      
+      return { bitcoin: btcData, ethereum: ethData };
+    } catch (error) {
+      console.error('Error fetching ETF flows:', error);
+      setEtfLoading(false);
+      return null;
+    }
+  }, [timeRange]); // Add timeRange as dependency
 
   // Function to get Binance interval and limit based on timeRange
   const getTimeRangeParams = (range, symbol) => {
@@ -648,8 +1165,8 @@ function App() {
     }
   };
 
-  // Function to fetch historical data
-  const fetchHistoricalData = async (symbol, range) => {
+  // Function to fetch historical data - memoized to maintain reference
+  const fetchHistoricalData = useCallback(async (symbol, range) => {
     try {
       const params = getTimeRangeParams(range, symbol);
       let url = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${params.interval}`;
@@ -687,10 +1204,10 @@ function App() {
       console.error(`Failed to fetch historical data for ${symbol}:`, err);
       return [];
     }
-  };
+  }, []);
 
-  // Function to handle time range change
-  const handleTimeRangeChange = async (range) => {
+  // Use useCallback for functions that are passed as props
+  const handleTimeRangeChange = useCallback(async (range) => {
     setTimeRange(range);
     setLoading(prev => ({ ...prev, historical: true }));
     
@@ -700,6 +1217,14 @@ function App() {
         fetchHistoricalData('ETH', range)
       ]);
 
+      // Update the cache first
+      dataCache.current = {
+        ...dataCache.current,
+        historicalBtc: btcHistory,
+        historicalEth: ethHistory
+      };
+
+      // Then update state (triggers render)
       setHistoricalData({
         bitcoin: btcHistory,
         ethereum: ethHistory
@@ -709,351 +1234,223 @@ function App() {
     } finally {
       setLoading(prev => ({ ...prev, historical: false }));
     }
-  };
+  }, [fetchHistoricalData]);
 
   // Add historical data fetch to initial load
   useEffect(() => {
     handleTimeRangeChange('24h');
-  }, []);
+  }, [handleTimeRangeChange]); // Add handleTimeRangeChange as a dependency
 
-  // Time range selector component
-  const TimeRangeSelector = () => (
-    <div className="time-range-selector">
-      {['24h', '7d', '1m', 'all'].map(range => (
-        <button
-          key={range}
-          className={`range-button ${timeRange === range ? 'active' : ''}`}
-          onClick={() => handleTimeRangeChange(range)}
-        >
-          {range}
-        </button>
-      ))}
-    </div>
-  );
-
-  // Individual crypto chart component
-  const CryptoChart = ({ data, symbol }) => {
-    if (!data || data.length === 0) return null;
-
-    // Calculate relative price changes
-    const calculateRelativeChanges = (prices) => {
-      const initialPrice = prices[0];
-      return prices.map(price => ((price - initialPrice) / initialPrice) * 100);
-    };
-
-    const formatDate = (date) => {
-      if (timeRange === '24h') {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      if (timeRange === '7d') {
-        return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-      }
-      if (timeRange === '1m') {
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-      }
-      if (timeRange === 'all') {
-        return date.toLocaleDateString([], { 
-          year: '2-digit',
-          month: 'numeric'
-        });
-      }
-      return date.toLocaleDateString();
-    };
-
-    const prices = data.map(item => item.price);
-    const relativeChanges = calculateRelativeChanges(prices);
-
-    // Calculate y-axis range with padding
-    const minValue = Math.floor(Math.min(...relativeChanges));
-    const maxValue = Math.ceil(Math.max(...relativeChanges));
-    const range = maxValue - minValue;
-    const padding = range * 0.1;
-
-    const color = symbol === 'BTC' ? '#f1c40f' : '#2ecc71';
-
-    return (
-      <Line
-        data={{
-          labels: data.map(item => formatDate(item.time)),
-          datasets: [
-            {
-              label: symbol,
-              data: relativeChanges,
-              borderColor: color,
-              backgroundColor: color,
-              tension: 0.1,
-              pointRadius: 0,
-              borderWidth: 2
-            }
-          ]
-        }}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: {
-            mode: 'index',
-            intersect: false,
-          },
-          plugins: {
-            legend: {
-              display: false
-            },
-            tooltip: {
-              mode: 'index',
-              intersect: false,
-              padding: 10,
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              borderColor: '#ddd',
-              borderWidth: 1,
-              titleColor: '#666',
-              bodyColor: '#666',
-              titleFont: {
-                size: 11,
-                weight: 'normal'
-              },
-              bodyFont: {
-                size: 11
-              },
-              callbacks: {
-                label: (context) => {
-                  const value = context.raw.toFixed(2);
-                  return `${symbol}: ${value}%`;
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              display: true,
-              grid: {
-                display: false,
-                drawBorder: false
-              },
-              ticks: {
-                maxRotation: 0,
-                minRotation: 0,
-                autoSkip: true,
-                maxTicksLimit: 6,
-                padding: 8,
-                font: {
-                  size: 10
-                },
-                color: '#666'
-              }
-            },
-            y: {
-              position: 'right',
-              min: minValue - padding,
-              max: maxValue + padding,
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)',
-                drawBorder: false
-              },
-              ticks: {
-                padding: 8,
-                stepSize: Math.ceil(range / 4),
-                callback: value => `${value.toFixed(1)}%`,
-                font: {
-                  size: 10
-                },
-                color: '#666'
-              }
-            }
-          }
-        }}
-      />
-    );
-  };
-
-  // Combined crypto chart component
-  const CombinedCryptoChart = ({ btcData, ethData }) => {
-    if (!btcData || !ethData || btcData.length === 0 || ethData.length === 0) return null;
-
-    // Calculate relative price changes
-    const calculateRelativeChanges = (prices) => {
-      const initialPrice = prices[0];
-      return prices.map(price => ((price - initialPrice) / initialPrice) * 100);
-    };
-
-    const formatDate = (date) => {
-      if (timeRange === '24h') {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      if (timeRange === '7d') {
-        return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-      }
-      if (timeRange === '1m') {
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-      }
-      if (timeRange === 'all') {
-        return date.toLocaleDateString([], { 
-          year: '2-digit',
-          month: 'numeric'
-        });
-      }
-      return date.toLocaleDateString();
-    };
-
-    const btcPrices = btcData.map(item => item.price);
-    const ethPrices = ethData.map(item => item.price);
-    const btcChanges = calculateRelativeChanges(btcPrices);
-    const ethChanges = calculateRelativeChanges(ethPrices);
-
-    // Calculate y-axis range with padding
-    const allChanges = [...btcChanges, ...ethChanges];
-    const minValue = Math.floor(Math.min(...allChanges));
-    const maxValue = Math.ceil(Math.max(...allChanges));
-    const range = maxValue - minValue;
-    const padding = range * 0.1;
-
-    return (
-      <Line
-        data={{
-          labels: btcData.map(item => formatDate(item.time)),
-          datasets: [
-            {
-              label: 'BTC',
-              data: btcChanges,
-              borderColor: '#f1c40f',
-              backgroundColor: '#f1c40f',
-              tension: 0.1,
-              pointRadius: 0,
-              borderWidth: 2,
-              realData: btcPrices // Add actual prices for tooltip
-            },
-            {
-              label: 'ETH',
-              data: ethChanges,
-              borderColor: '#2ecc71',
-              backgroundColor: '#2ecc71',
-              tension: 0.1,
-              pointRadius: 0,
-              borderWidth: 2,
-              realData: ethPrices // Add actual prices for tooltip
-            }
-          ]
-        }}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: {
-            mode: 'index',
-            intersect: false,
-          },
-          plugins: {
-            legend: {
-              display: true,
-              position: 'top',
-              labels: {
-                usePointStyle: true,
-                padding: 20,
-                font: {
-                  size: 12
-                }
-              }
-            },
-            tooltip: {
-              mode: 'index',
-              intersect: false,
-              padding: 10,
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              borderColor: '#ddd',
-              borderWidth: 1,
-              titleColor: '#666',
-              bodyColor: '#666',
-              titleFont: {
-                size: 12,
-                weight: 'normal'
-              },
-              bodyFont: {
-                size: 12
-              },
-              callbacks: {
-                label: (context) => {
-                  const price = context.dataset.realData[context.dataIndex];
-                  const change = context.raw.toFixed(2);
-                  return `${context.dataset.label}: $${price.toLocaleString()} (${change}%)`;
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              display: true,
-              grid: {
-                display: false,
-                drawBorder: false
-              },
-              ticks: {
-                maxRotation: 0,
-                minRotation: 0,
-                autoSkip: true,
-                maxTicksLimit: 6,
-                padding: 8,
-                font: {
-                  size: 11
-                },
-                color: '#666'
-              }
-            },
-            y: {
-              position: 'right',
-              min: minValue - padding,
-              max: maxValue + padding,
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)',
-                drawBorder: false
-              },
-              ticks: {
-                padding: 8,
-                stepSize: Math.ceil(range / 4),
-                callback: value => `${value.toFixed(1)}%`,
-                font: {
-                  size: 11
-                },
-                color: '#666'
-              }
-            }
-          }
-        }}
-      />
-    );
-  };
-
-  // Calculate price and market cap changes for the selected time range
-  const calculateChanges = (historicalPrices) => {
-    if (!historicalPrices || historicalPrices.length < 2) {
-      return { priceChange: 0, mcapChange: 0 };
-    }
+  // Update the fetchCryptoNews function to properly handle dependencies
+  const fetchCryptoNews = useCallback(async () => {
+    const API_KEY = '8830ad7e5785fd64639a28710b4a2eb6b8fac83f9457cee059aff40c0311ad41';
     
     try {
-      const firstPrice = parseFloat(historicalPrices[0].price);
-      const lastPrice = parseFloat(historicalPrices[historicalPrices.length - 1].price);
-      
-      // Validate prices are numbers and not zero
-      if (isNaN(firstPrice) || isNaN(lastPrice) || firstPrice === 0) {
-        console.warn('Invalid price data detected');
-        return { priceChange: 0, mcapChange: 0 };
+      setNewsLoading(true);
+      const response = await axiosWithRetry(
+        `https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,ETH&excludeCategories=Sponsored,ICO&api_key=${API_KEY}`,
+        {
+          headers: {
+            'Authorization': `Apikey ${API_KEY}`
+          }
+        }
+      );
+
+      if (!response.data || !response.data.Data) {
+        throw new Error('Invalid news data received');
       }
 
-      // Calculate percentage change: ((new - old) / old) * 100
-      const priceChange = ((lastPrice - firstPrice) / firstPrice) * 100;
-      
-      // Ensure the result is a finite number
-      const validPriceChange = isFinite(priceChange) ? priceChange : 0;
-      
-      return {
-        priceChange: validPriceChange,
-        mcapChange: validPriceChange // Market cap change follows price change
-      };
-    } catch (error) {
-      console.error('Error calculating price changes:', error);
-      return { priceChange: 0, mcapChange: 0 };
-    }
-  };
+      const formattedNews = response.data.Data
+        .filter(article => article.title && article.url && article.imageurl)
+        .slice(0, 6)
+        .map(article => ({
+          title: article.title,
+          url: article.url,
+          source: article.source_info?.name || article.source,
+          image: article.imageurl,
+          time: new Date(article.published_on * 1000).toLocaleString()
+        }));
 
-  // Update the crypto card render
-  const renderCryptoCard = (crypto, index) => {
+      if (formattedNews.length === 0) {
+        throw new Error('No valid news articles found');
+      }
+
+      setNewsData(formattedNews);
+    } catch (error) {
+      console.error('Failed to fetch news:', error);
+      setNewsData([{
+        title: "Unable to load news feed",
+        url: "#",
+        source: "System",
+        image: "https://via.placeholder.com/80x60?text=News",
+        time: new Date().toLocaleString()
+      }]);
+    } finally {
+      setNewsLoading(false);
+    }
+  }, [setNewsData, setNewsLoading]); // Add state setters as dependencies
+
+  // Update the CryptoNews component
+  const CryptoNews = memo(({ newsData, isLoading }) => {
+    if (isLoading) {
+      return (
+        <div className="crypto-news">
+          <div className="news-header">
+            <h3>Trending News</h3>
+          </div>
+          <LoadingOverlay />
+        </div>
+      );
+    }
+
+    return (
+      <div className="crypto-news">
+        <div className="news-header">
+          <h3>Trending News</h3>
+          {!isLoading && (!newsData || newsData.length === 0) && (
+            <p className="news-error">Unable to load news</p>
+          )}
+        </div>
+        <div className="news-list">
+          {newsData.map((news, index) => (
+            <a 
+              key={`${news.url}-${index}`}
+              href={news.url} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="news-item"
+            >
+              <div className="news-image">
+                <img 
+                  src={news.image} 
+                  alt={news.title}
+                  onError={(e) => {
+                    e.target.src = 'https://via.placeholder.com/80x60?text=News';
+                  }}
+                />
+              </div>
+              <div className="news-content">
+                <h4>{news.title}</h4>
+                <div className="news-meta">
+                  <span className="news-source">{news.source}</span>
+                  <span className="news-time">{news.time}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    );
+  });
+
+  // Update the useEffect to properly handle the fetchCryptoNews dependency
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchInitialData = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchCryptoData(),
+          fetchMarketPressure(),
+          fetchExchangeReserves(),
+          fetchEtfFlows(),
+          fetchHistoricalData('BTC', timeRange),
+          fetchHistoricalData('ETH', timeRange),
+          fetchCryptoNews()
+        ]);
+        if (isMounted) {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error fetching initial data:', error);
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchInitialData();
+
+    // Set up intervals with proper cleanup
+    const intervals = [
+      { fn: fetchCryptoData, delay: 5000 },
+      { fn: fetchMarketPressure, delay: 5100 },
+      { fn: fetchExchangeReserves, delay: 30200 },
+      { fn: fetchEtfFlows, delay: 300300 },
+      { fn: fetchCryptoNews, delay: 300000 }
+    ];
+
+    const cleanupIntervals = intervals.map(({ fn, delay }) => {
+      const interval = setInterval(() => {
+        if (isMounted) fn();
+      }, delay);
+      return interval;
+    });
+
+    return () => {
+      isMounted = false;
+      cleanupIntervals.forEach(clearInterval);
+    };
+  }, [
+    fetchHistoricalData,
+    timeRange,
+    fetchEtfFlows,
+    fetchCryptoNews,
+    fetchCryptoData,
+    fetchMarketPressure,
+    fetchExchangeReserves
+  ]); // Include all function dependencies
+
+  // Calculate price and market cap changes for the selected time range
+  const calculateChanges = useCallback((historicalPrices) => {
+    if (!historicalPrices || historicalPrices.length === 0) {
+      return {
+        dailyChange: 0,
+        weeklyChange: 0,
+        monthlyChange: 0,
+        yearlyChange: 0
+      };
+    }
+
+    const latest = historicalPrices[historicalPrices.length - 1];
+    const yesterday = historicalPrices.find(p => {
+      const date = new Date(p.date);
+      const latestDate = new Date(latest.date);
+      return date.getDate() === latestDate.getDate() - 1 || 
+             (latestDate.getDate() === 1 && date.getDate() === new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate());
+    }) || historicalPrices[historicalPrices.length - 2] || latest;
+    
+    const lastWeek = historicalPrices.find(p => {
+      const date = new Date(p.date);
+      const latestDate = new Date(latest.date);
+      return Math.abs(date - latestDate) / (1000 * 60 * 60 * 24) >= 7 && 
+             Math.abs(date - latestDate) / (1000 * 60 * 60 * 24) < 8;
+    }) || historicalPrices[Math.max(0, historicalPrices.length - 8)] || latest;
+    
+    const lastMonth = historicalPrices.find(p => {
+      const date = new Date(p.date);
+      const latestDate = new Date(latest.date);
+      return date.getMonth() === (latestDate.getMonth() === 0 ? 11 : latestDate.getMonth() - 1);
+    }) || historicalPrices[Math.max(0, historicalPrices.length - 31)] || latest;
+    
+    const lastYear = historicalPrices.find(p => {
+      const date = new Date(p.date);
+      const latestDate = new Date(latest.date);
+      return date.getFullYear() === latestDate.getFullYear() - 1 && 
+             date.getMonth() === latestDate.getMonth();
+    }) || historicalPrices[0] || latest;
+
+    return {
+      dailyChange: ((latest.price - yesterday.price) / yesterday.price) * 100,
+      weeklyChange: ((latest.price - lastWeek.price) / lastWeek.price) * 100,
+      monthlyChange: ((latest.price - lastMonth.price) / lastMonth.price) * 100,
+      yearlyChange: ((latest.price - lastYear.price) / lastYear.price) * 100
+    };
+  }, []);
+
+  // Update the crypto card render with memoization
+  const renderCryptoCard = useCallback((crypto, index) => {
     const changes = calculateChanges(historicalData[crypto.id]);
     const timeRangeDisplay = timeRange === '24h' ? '24h' : 
                             timeRange === '7d' ? '7d' : 
@@ -1075,78 +1472,37 @@ function App() {
           <div className="price-info">
             <div className="main-price">
               <p className="price">${crypto.current_price.toLocaleString()}</p>
-              <p className={`price-change ${changes.priceChange >= 0 ? 'positive' : 'negative'}`}>
-                {changes.priceChange.toFixed(2)}% ({timeRangeDisplay})
+              <p className={`price-change ${changes.dailyChange >= 0 ? 'positive' : 'negative'}`}>
+                {changes.dailyChange.toFixed(2)}% ({timeRangeDisplay})
               </p>
             </div>
             <div className="market-info">
               <p className="market-cap">MCap: {formatMarketCap(crypto.market_cap)}</p>
-              <p className={`market-cap-change ${changes.mcapChange >= 0 ? 'positive' : 'negative'}`}>
-                {changes.mcapChange.toFixed(2)}% ({timeRangeDisplay})
+              <p className={`market-cap-change ${changes.yearlyChange >= 0 ? 'positive' : 'negative'}`}>
+                {changes.yearlyChange.toFixed(2)}% ({timeRangeDisplay})
               </p>
             </div>
           </div>
           <div className="chart-section">
-            <TimeRangeSelector />
+            <TimeRangeSelector activeRange={timeRange} onRangeChange={handleTimeRangeChange} />
             <div className="chart-container">
               <CryptoChart 
                 data={historicalData[crypto.id]}
                 symbol={crypto.symbol}
+                timeRange={timeRange}
               />
             </div>
           </div>
         </div>
       </div>
     );
-  };
-
-  useEffect(() => {
-    // Initial data fetch
-    const fetchInitialData = async () => {
-      await Promise.all([
-        fetchCryptoData(),
-        fetchMarketPressure(),
-        fetchExchangeReserves(),
-        fetchEtfFlows()
-      ]);
-    };
-
-    fetchInitialData();
-
-    // Set up individual intervals for different data types
-    const priceInterval = setInterval(fetchCryptoData, 5000); // Every 5 seconds
-    const pressureInterval = setInterval(fetchMarketPressure, 5000);
-    const reservesInterval = setInterval(fetchExchangeReserves, 30000); // Every 30 seconds
-    const etfInterval = setInterval(fetchEtfFlows, 300000); // Every 5 minutes
-
-    // Cleanup intervals
-    return () => {
-      clearInterval(priceInterval);
-      clearInterval(pressureInterval);
-      clearInterval(reservesInterval);
-      clearInterval(etfInterval);
-    };
-  }, []);
-
-  // Add data freshness indicator component
-  const DataFreshness = ({ type }) => (
-    <div className="data-freshness">
-      Last updated: {dataFreshness[type] || 'Never'}
-    </div>
-  );
-
-  // Loading component for individual sections
-  const LoadingOverlay = () => (
-    <div className="loading-overlay">
-      <div className="loading-spinner"></div>
-    </div>
-  );
+  }, [historicalData, timeRange, handleTimeRangeChange, calculateChanges]);
 
   if (!cryptoData) return <div className="loading">Loading dashboard...</div>;
   if (error) return <div className="error">{error}</div>;
 
-  // Sort by market cap to determine leader
-  const sortedCrypto = [...cryptoData].sort((a, b) => b.market_cap - a.market_cap);
+  // Use cryptoData directly instead of creating an unused sortedCrypto variable
+  const cryptoCards = cryptoData.map((crypto, index) => renderCryptoCard(crypto, index));
 
   // Calculate price ratio and store historical data
   const btcData = cryptoData.find(crypto => crypto.id === 'bitcoin');
@@ -1168,6 +1524,20 @@ function App() {
       localStorage.setItem(`${symbol}_timeframe`, selectedTimeframe);
     }, [selectedTimeframe, symbol]);
 
+    // Destroy chart on unmount - Fix the dependency array
+    useEffect(() => {
+      if (chartRef.current) {
+        const chart = chartRef.current;
+        
+        // Return cleanup function
+        return () => {
+          if (chart) {
+            chart.destroy();
+          }
+        };
+      }
+    }, []); // Empty dependency array since we only need to clean up on unmount
+
     const colors = {
       BTC: {
         primary: '#f1c40f',
@@ -1180,15 +1550,6 @@ function App() {
         text: '#2ecc71'
       }
     };
-
-    // Destroy chart on unmount
-    useEffect(() => {
-      return () => {
-        if (chartRef.current) {
-          chartRef.current.destroy();
-        }
-      };
-    }, []);
 
     const timeframeData = data[selectedTimeframe] || [];
 
@@ -1297,11 +1658,11 @@ function App() {
                 min: -30,
                 max: 30,
                 grid: {
-                  color: 'rgba(0,0,0,0.05)',
+                  color: 'rgba(0, 0, 0, 0.05)',
                   drawBorder: false
                 },
                 ticks: {
-                  callback: value => `${value}%`,
+                  padding: 8,
                   stepSize: 10,
                   font: {
                     size: 11
@@ -1330,30 +1691,38 @@ function App() {
     <div className="dashboard">
       <h1>ETH vs BTC Dashboard</h1>
       
-      {/* Combined Price Chart Section */}
-      <div className="combined-chart-section">
-        <div className="section-header">
-          <h2>Price Comparison</h2>
-          <DataFreshness type="prices" />
+      {/* Combined Price Chart and News Section */}
+      <div className="chart-news-container">
+        <div className="combined-chart-section">
+          <div className="section-header">
+            <h2>Price Comparison</h2>
+            <DataFreshness timestamp={dataFreshness.prices} />
+          </div>
+          <div className="chart-container">
+            <TimeRangeSelector activeRange={timeRange} onRangeChange={handleTimeRangeChange} />
+            <CombinedCryptoChart 
+              btcData={historicalData.bitcoin}
+              ethData={historicalData.ethereum}
+              timeRange={timeRange}
+            />
+          </div>
         </div>
-        <div className="chart-container">
-          <TimeRangeSelector />
-          <CombinedCryptoChart 
-            btcData={historicalData.bitcoin}
-            ethData={historicalData.ethereum}
-          />
-        </div>
+        
+        <CryptoNews 
+          newsData={newsData}
+          isLoading={newsLoading}
+        />
       </div>
 
       {/* Scoreboard Section */}
       <div className="scoreboard">
         <div className="section-header">
           <h2>Crypto Leaderboard</h2>
-          <DataFreshness type="prices" />
+          <DataFreshness timestamp={dataFreshness.prices} />
         </div>
         <div className={`crypto-cards ${loading.prices ? 'loading-section' : ''}`}>
           {loading.prices && <LoadingOverlay />}
-          {cryptoData.map((crypto, index) => renderCryptoCard(crypto, index))}
+          {cryptoCards}
         </div>
       </div>
 
@@ -1362,7 +1731,7 @@ function App() {
         <div className="market-pressure">
           <div className="section-header">
             <h2>Market Pressure</h2>
-            <DataFreshness type="pressure" />
+            <DataFreshness timestamp={dataFreshness.pressure} />
           </div>
           <div className="pressure-charts">
             <PressureBarChart 
@@ -1377,106 +1746,19 @@ function App() {
         </div>
       )}
 
-      {/* Futures Positions Section */}
-      {marketPressure && (
-        <div className="futures-positions">
-          <h2>Futures Positions</h2>
-          <div className="futures-cards">
-            <div className="futures-card">
-              <div className="futures-header">
-                <img 
-                  src="https://assets.coingecko.com/coins/images/1/small/bitcoin.png" 
-                  alt="Bitcoin"
-                  className="crypto-icon"
-                />
-              </div>
-              <div className="futures-bar">
-                <div 
-                  className="buy-pressure" 
-                  style={{ 
-                    width: `${marketPressure.bitcoin.current.buyStrength}%`,
-                    backgroundColor: '#2ecc71',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '0.9em'
-                  }}
-                >
-                  {marketPressure.bitcoin.current.buyStrength.toFixed(1)}%
-                </div>
-                <div 
-                  className="sell-pressure"
-                  style={{ 
-                    width: `${marketPressure.bitcoin.current.sellStrength}%`,
-                    backgroundColor: '#ff7675',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '0.9em'
-                  }}
-                >
-                  {marketPressure.bitcoin.current.sellStrength.toFixed(1)}%
-                </div>
-              </div>
-            </div>
-            <div className="futures-card">
-              <div className="futures-header">
-                <img 
-                  src="https://assets.coingecko.com/coins/images/279/small/ethereum.png" 
-                  alt="Ethereum"
-                  className="crypto-icon"
-                />
-              </div>
-              <div className="futures-bar">
-                <div 
-                  className="buy-pressure" 
-                  style={{ 
-                    width: `${marketPressure.ethereum.current.buyStrength}%`,
-                    backgroundColor: '#2ecc71',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '0.9em'
-                  }}
-                >
-                  {marketPressure.ethereum.current.buyStrength.toFixed(1)}%
-                </div>
-                <div 
-                  className="sell-pressure"
-                  style={{ 
-                    width: `${marketPressure.ethereum.current.sellStrength}%`,
-                    backgroundColor: '#ff7675',
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '0.9em'
-                  }}
-                >
-                  {marketPressure.ethereum.current.sellStrength.toFixed(1)}%
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ETF Flows Section */}
-      <ETFFlowsSection />
+      {/* ETF Flows Section - Pass the state from App component */}
+      <ETFFlowsSection 
+        etfData={etfData} 
+        isLoading={etfLoading} 
+        dataFreshness={dataFreshness.etf} 
+      />
 
       {/* Exchange Reserves Section */}
       {exchangeReserves && (
         <div className="exchange-reserves">
           <div className="section-header">
             <h2>Exchange Reserves</h2>
-            <DataFreshness type="reserves" />
+            <DataFreshness timestamp={dataFreshness.reserves} />
           </div>
           <div className="reserves-cards">
             <div className="reserves-card">
@@ -1503,7 +1785,7 @@ function App() {
       <div className="price-ratio">
         <div className="section-header">
           <h2>ETH/BTC Price Ratio</h2>
-          <DataFreshness type="prices" />
+          <DataFreshness timestamp={dataFreshness.prices} />
         </div>
         <div className="ratio-card">
           <div className="ratio-header">
@@ -1558,156 +1840,64 @@ function App() {
             </div>
           </div>
           
-          {priceRatio.length > 1 && (
-            <div className="ratio-chart-container">
-              <Line
-                data={{
-                  labels: priceRatio.map(item => {
-                    const date = new Date(item.timestamp || new Date()); 
-                    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  }),
-                  datasets: [
-                    {
-                      label: 'ETH/BTC Ratio',
-                      data: priceRatio.map(item => item.ratio),
-                      fill: {
-                        target: 'origin',
-                        above: 'rgba(46, 204, 113, 0.1)',   // Green tint above the line
-                      },
-                      backgroundColor: '#2ecc71',
-                      borderColor: '#2ecc71',
-                      borderWidth: 2,
-                      pointRadius: 0,
-                      pointHoverRadius: 5,
-                      pointHoverBackgroundColor: '#2ecc71',
-                      pointHoverBorderColor: '#fff',
-                      pointHoverBorderWidth: 2,
-                      tension: 0.4,
-                      // Store original data for tooltip
-                      btcPrices: priceRatio.map(item => item.btcPrice),
-                      ethPrices: priceRatio.map(item => item.ethPrice),
+          <div className="ratio-chart-container">
+            <Line
+              data={{
+                labels: priceRatio.map(item => {
+                  const date = new Date(item.timestamp || new Date()); 
+                  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }),
+                datasets: [
+                  {
+                    label: 'ETH/BTC Ratio',
+                    data: priceRatio.map(item => item.ratio),
+                    fill: {
+                      target: 'origin',
+                      above: 'rgba(46, 204, 113, 0.1)',   // Green tint above the line
                     },
-                  ],
-                }}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  interaction: {
-                    mode: 'index',
-                    intersect: false,
+                    backgroundColor: '#2ecc71',
+                    borderColor: '#2ecc71',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    pointHoverBackgroundColor: '#2ecc71',
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
+                    tension: 0.4,
+                    // Store original data for tooltip
+                    btcPrices: priceRatio.map(item => item.btcPrice),
+                    ethPrices: priceRatio.map(item => item.ethPrice),
                   },
-                  plugins: {
-                    legend: {
-                      display: false
-                    },
-                    tooltip: {
-                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      titleColor: '#666',
-                      bodyColor: '#666',
-                      borderColor: '#ddd',
-                      borderWidth: 1,
-                      padding: 12,
-                      displayColors: false,
-                      callbacks: {
-                        title: (context) => {
-                          return `ETH/BTC Ratio at ${context[0].label}`;
-                        },
-                        label: (context) => {
-                          const ratio = context.raw.toFixed(4);
-                          const ethPrice = context.dataset.ethPrices[context.dataIndex].toLocaleString();
-                          const btcPrice = context.dataset.btcPrices[context.dataIndex].toLocaleString();
-                          
-                          // Calculate percentage difference from current
-                          const currentValue = priceRatio[priceRatio.length-1].ratio;
-                          const pointValue = context.raw;
-                          const percentDiff = ((pointValue - currentValue) / currentValue * 100).toFixed(2);
-                          const diffPrefix = percentDiff > 0 ? '+' : '';
-                          
-                          return [
-                            `Ratio: ${ratio}`,
-                            `ETH: $${ethPrice}`,
-                            `BTC: $${btcPrice}`,
-                            `${diffPrefix}${percentDiff}% from current`
-                          ];
-                        }
-                      }
-                    }
+                ],
+              }}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    display: false
                   },
-                  scales: {
-                    x: {
-                      grid: {
-                        display: false,
-                        drawBorder: false
-                      },
-                      ticks: {
-                        maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: 8,
-                        padding: 8,
-                        font: {
-                          size: 11
-                        },
-                        color: '#666'
-                      }
-                    },
-                    y: {
-                      position: 'right',
-                      grid: {
-                        color: (context) => {
-                          // Highlight the zero line
-                          if (context.tick && context.tick.value === 0) {
-                            return 'rgba(0, 0, 0, 0.2)';
-                          }
-                          return 'rgba(0, 0, 0, 0.05)';
-                        },
-                        lineWidth: (context) => {
-                          if (context.tick && context.tick.value === 0) {
-                            return 2;
-                          }
-                          return 1;
-                        }
-                      },
-                      ticks: {
-                        padding: 8,
-                        callback: value => value.toFixed(4),
-                        font: {
-                          size: 11
-                        },
-                        color: '#666'
+                  tooltip: {
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    titleColor: '#666',
+                    bodyColor: '#666',
+                    borderColor: '#ddd',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: false,
+                    callbacks: {
+                      title: (context) => {
+                        return `ETH/BTC Ratio at ${context[0].label}`;
                       }
                     }
                   }
-                }}
-              />
-            </div>
-          )}
-          
-          {/* Historical ratio stats */}
-          <div className="ratio-stats">
-            <div className="stat-item">
-              <p className="stat-label">24h High</p>
-              <p className="stat-value">
-                {priceRatio.length > 0 ? 
-                  Math.max(...priceRatio.map(item => item.ratio)).toFixed(4) : 
-                  '0.0000'}
-              </p>
-            </div>
-            <div className="stat-item">
-              <p className="stat-label">24h Low</p>
-              <p className="stat-value">
-                {priceRatio.length > 0 ? 
-                  Math.min(...priceRatio.map(item => item.ratio)).toFixed(4) : 
-                  '0.0000'}
-              </p>
-            </div>
-            <div className="stat-item">
-              <p className="stat-label">24h Avg</p>
-              <p className="stat-value">
-                {priceRatio.length > 0 ? 
-                  (priceRatio.reduce((sum, item) => sum + item.ratio, 0) / priceRatio.length).toFixed(4) : 
-                  '0.0000'}
-              </p>
-            </div>
+                }
+              }}
+            />
           </div>
         </div>
       </div>
@@ -1715,4 +1905,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;
