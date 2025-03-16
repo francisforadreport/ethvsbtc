@@ -375,201 +375,9 @@ const TimeRangeSelector = memo(({ activeRange, onRangeChange }) => (
 ));
 
 // Memoize the CryptoChart component with proper dependencies
-const CryptoChart = memo(({ data, symbol, timeRange }) => {
-  // Always declare hooks at the top level, before any conditional logic
-  const chartRef = useRef(null);
-
-  const calculateRelativeChanges = useCallback((prices) => {
-    if (!prices || prices.length === 0) return [];
-    const initialPrice = prices[0];
-    return prices.map(price => ((price - initialPrice) / initialPrice) * 100);
-  }, []);
-
-  const formatDate = useCallback((date) => {
-    if (!date) return '';
-    if (timeRange === '24h') {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    if (timeRange === '7d') {
-      return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-    }
-    if (timeRange === '1m') {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-    if (timeRange === 'all') {
-      return date.toLocaleDateString([], { 
-        year: '2-digit',
-        month: 'numeric'
-      });
-    }
-    return date.toLocaleDateString();
-  }, [timeRange]);
-
-  // Safe data access with default values
-  const prices = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    return data.map(item => item.price);
-  }, [data]);
-  
-  const relativeChanges = useMemo(() => 
-    calculateRelativeChanges(prices), 
-  [calculateRelativeChanges, prices]);
-
-  // Calculate y-axis range with padding
-  const { minValue, maxValue, range, padding } = useMemo(() => {
-    if (relativeChanges.length === 0) {
-      return { minValue: 0, maxValue: 0, range: 0, padding: 0 };
-    }
-    const min = Math.floor(Math.min(...relativeChanges));
-    const max = Math.ceil(Math.max(...relativeChanges));
-    const r = max - min;
-    const p = r * 0.1;
-    return { minValue: min, maxValue: max, range: r, padding: p };
-  }, [relativeChanges]);
-
-  const color = symbol === 'BTC' ? '#f1c40f' : '#2ecc71';
-  
-  // Memoize chart data to prevent unnecessary recalculations
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) {
-      return {
-        labels: [],
-        datasets: [{
-          label: symbol,
-          data: [],
-          borderColor: color,
-          backgroundColor: color,
-          tension: 0.1,
-          pointRadius: 0,
-          borderWidth: 2
-        }]
-      };
-    }
-    
-    return {
-      labels: data.map(item => formatDate(item.time)),
-      datasets: [
-        {
-          label: symbol,
-          data: relativeChanges,
-          borderColor: color,
-          backgroundColor: color,
-          tension: 0.1,
-          pointRadius: 0,
-          borderWidth: 2
-        }
-      ]
-    };
-  }, [data, formatDate, relativeChanges, symbol, color]);
-  
-  // Memoize chart options to prevent unnecessary recalculations
-  const chartOptions = useMemo(() => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false, // Disable animations to prevent flickering
-    interaction: {
-      mode: 'index',
-      intersect: false,
-    },
-    plugins: {
-      legend: {
-        display: false
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false,
-        padding: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
-        borderColor: '#ddd',
-        borderWidth: 1,
-        titleColor: '#666',
-        bodyColor: '#666',
-        titleFont: {
-          size: 11,
-          weight: 'normal'
-        },
-        bodyFont: {
-          size: 11
-        },
-        callbacks: {
-          label: (context) => {
-            const value = context.raw.toFixed(2);
-            return `${symbol}: ${value}%`;
-          }
-        }
-      }
-    },
-    scales: {
-      x: {
-        display: true,
-        grid: {
-          display: false,
-          drawBorder: false
-        },
-        ticks: {
-          maxRotation: 0,
-          minRotation: 0,
-          autoSkip: true,
-          maxTicksLimit: 6,
-          padding: 8,
-          font: {
-            size: 10
-          },
-          color: '#666'
-        }
-      },
-      y: {
-        position: 'right',
-        min: minValue - padding,
-        max: maxValue + padding,
-        grid: {
-          color: 'rgba(0, 0, 0, 0.05)',
-          drawBorder: false
-        },
-        ticks: {
-          padding: 8,
-          stepSize: Math.ceil(range || 1) / 4,
-          callback: value => `${value.toFixed(1)}%`,
-          font: {
-            size: 10
-          },
-          color: '#666'
-        }
-      }
-    }
-  }), [minValue, maxValue, range, padding, symbol]);
-
-  // Early return after hooks
-  if (!data || data.length === 0) {
-    return <div className="chart-wrapper empty-chart">No data available</div>;
-  }
-
-  return (
-    <div className="chart-wrapper">
-      <Line
-        ref={chartRef}
-        data={chartData}
-        options={chartOptions}
-        redraw={false}
-      />
-    </div>
-  );
-}, (prevProps, nextProps) => {
-  // Custom comparison function for memo
-  // Only re-render if data length changes significantly or timeRange changes
-  if (prevProps.timeRange !== nextProps.timeRange) return false;
-  if (!prevProps.data || !nextProps.data) return false;
-  if (Math.abs((prevProps.data?.length || 0) - (nextProps.data?.length || 0)) > 5) return false;
-  
-  // Check if the last data point has changed significantly
-  if (prevProps.data?.length > 0 && nextProps.data?.length > 0) {
-    const prevLast = prevProps.data[prevProps.data.length - 1];
-    const nextLast = nextProps.data[nextProps.data.length - 1];
-    if (Math.abs(prevLast.price - nextLast.price) / prevLast.price > 0.005) return false; // 0.5% change
-  }
-  
-  return true; // Don't re-render for small changes
-});
+// const CryptoChart = memo(({ data, options, ...props }) => {
+//   ... component code
+// });
 
 // Memoize the CombinedCryptoChart component with proper dependencies
 const CombinedCryptoChart = memo(({ btcData, ethData, timeRange }) => {
@@ -806,56 +614,56 @@ function App() {
     historicalEth: []
   });
 
-  // Function to fetch basic crypto data from Binance
+    // Function to fetch basic crypto data from Binance
   const fetchCryptoData = useCallback(async () => {
-    try {
+      try {
       setLoading(prev => ({ ...prev, prices: true }));
-      const [btcResponse, ethResponse] = await Promise.all([
-        axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'),
-        axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT')
-      ]);
+        const [btcResponse, ethResponse] = await Promise.all([
+          axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'),
+          axiosWithRetry('https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT')
+        ]);
 
-      // Update data freshness
-      setDataFreshness(prev => ({
-        ...prev,
-        prices: new Date().toLocaleTimeString()
-      }));
+        // Update data freshness
+        setDataFreshness(prev => ({
+          ...prev,
+          prices: new Date().toLocaleTimeString()
+        }));
 
-      // Transform the data to match our expected format
-      const transformedData = [
-        {
-          id: 'bitcoin',
-          name: 'Bitcoin',
-          symbol: 'BTC',
-          current_price: parseFloat(btcResponse.data.lastPrice),
-          price_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
-          market_cap: parseFloat(btcResponse.data.quoteVolume),
-          market_cap_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
-          image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
-        },
-        {
-          id: 'ethereum',
-          name: 'Ethereum',
-          symbol: 'ETH',
-          current_price: parseFloat(ethResponse.data.lastPrice),
-          price_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
-          market_cap: parseFloat(ethResponse.data.quoteVolume),
-          market_cap_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
-          image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png'
-        }
-      ];
+        // Transform the data to match our expected format
+        const transformedData = [
+          {
+            id: 'bitcoin',
+            name: 'Bitcoin',
+            symbol: 'BTC',
+            current_price: parseFloat(btcResponse.data.lastPrice),
+            price_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
+            market_cap: parseFloat(btcResponse.data.quoteVolume),
+            market_cap_change_percentage_24h: parseFloat(btcResponse.data.priceChangePercent),
+            image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png'
+          },
+          {
+            id: 'ethereum',
+            name: 'Ethereum',
+            symbol: 'ETH',
+            current_price: parseFloat(ethResponse.data.lastPrice),
+            price_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
+            market_cap: parseFloat(ethResponse.data.quoteVolume),
+            market_cap_change_percentage_24h: parseFloat(ethResponse.data.priceChangePercent),
+            image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png'
+          }
+        ];
 
-      setCryptoData(transformedData);
-      
+        setCryptoData(transformedData);
+        
       // Calculate ETH/BTC ratio (not BTC/ETH)
-      const btcPrice = parseFloat(btcResponse.data.lastPrice);
-      const ethPrice = parseFloat(ethResponse.data.lastPrice);
+        const btcPrice = parseFloat(btcResponse.data.lastPrice);
+        const ethPrice = parseFloat(ethResponse.data.lastPrice);
       const ratio = ethPrice / btcPrice; // ETH/BTC ratio
       
       // Store timestamp for better x-axis display
       const timestamp = new Date();
       
-      setPriceRatio(prev => {
+        setPriceRatio(prev => {
         const newData = [...prev, { 
           date: timestamp.toLocaleTimeString(), 
           ratio,
@@ -867,32 +675,32 @@ function App() {
       });
 
       setError(null);
-    } catch (err) {
-      setError(`Failed to fetch crypto data: ${err.message}`);
-      console.error('Binance API Error:', err);
+      } catch (err) {
+        setError(`Failed to fetch crypto data: ${err.message}`);
+        console.error('Binance API Error:', err);
     } finally {
       setLoading(prev => ({ ...prev, prices: false }));
-    }
+      }
   }, [setLoading, setDataFreshness, setError, setPriceRatio, setCryptoData]);
 
   // Function to fetch market pressure data
   const fetchMarketPressure = useCallback(async () => {
-    try {
+      try {
       setLoading(prev => ({ ...prev, pressure: true }));
       
       // Fetch current order book data
-      const [btcBook, ethBook] = await Promise.all([
+        const [btcBook, ethBook] = await Promise.all([
         axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100'),
         axiosWithRetry('https://api.binance.com/api/v3/depth?symbol=ETHUSDT&limit=100')
-      ]);
+        ]);
 
-      setDataFreshness(prev => ({
-        ...prev,
-        pressure: new Date().toLocaleTimeString()
-      }));
+        setDataFreshness(prev => ({
+          ...prev,
+          pressure: new Date().toLocaleTimeString()
+        }));
 
       // Simplified pressure calculation
-      const calculatePressure = (bookData) => {
+        const calculatePressure = (bookData) => {
         // Calculate total buy and sell volumes from order book
         const buyVolume = bookData.bids.reduce((acc, [price, qty]) => 
           acc + (parseFloat(price) * parseFloat(qty)), 0);
@@ -958,24 +766,24 @@ function App() {
         });
 
         return data;
-      };
+        };
 
-      const btcPressure = calculatePressure(btcBook.data);
-      const ethPressure = calculatePressure(ethBook.data);
+        const btcPressure = calculatePressure(btcBook.data);
+        const ethPressure = calculatePressure(ethBook.data);
 
-      setMarketPressure({
-        bitcoin: {
+        setMarketPressure({
+          bitcoin: {
           current: btcPressure,
           timeframes: generateTimeSeriesData(btcPressure, 'BTC')
-        },
-        ethereum: {
+          },
+          ethereum: {
           current: ethPressure,
           timeframes: generateTimeSeriesData(ethPressure, 'ETH')
-        }
-      });
+          }
+        });
 
-    } catch (err) {
-      console.error('Failed to fetch market pressure:', err);
+      } catch (err) {
+        console.error('Failed to fetch market pressure:', err);
     } finally {
       setLoading(prev => ({ ...prev, pressure: false }));
     }
@@ -1005,7 +813,7 @@ function App() {
       const btcReserves = (btcVolume * 0.20) / btcPrice;
       const ethReserves = (ethVolume * 0.20) / ethPrice;
 
-      setExchangeReserves({
+        setExchangeReserves({
         bitcoin: btcReserves,
         ethereum: ethReserves
       });
@@ -1016,7 +824,7 @@ function App() {
       }));
 
       setError(null);
-    } catch (err) {
+      } catch (err) {
       console.error('Failed to fetch exchange reserves:', err);
       // Use alternative endpoint if the first one fails
       try {
@@ -1094,9 +902,9 @@ function App() {
     }
 
     return data;
-  };
+    };
 
-  // Function to fetch ETF flows - using mock data as Binance doesn't provide ETF data
+    // Function to fetch ETF flows - using mock data as Binance doesn't provide ETF data
   const fetchEtfFlows = useCallback(async () => {
     try {
       setEtfLoading(true);
@@ -1293,7 +1101,7 @@ function App() {
   // Update the CryptoNews component
   const CryptoNews = memo(({ newsData, isLoading }) => {
     if (isLoading) {
-      return (
+  return (
         <div className="crypto-news">
           <div className="news-header">
             <h3>Trending News</h3>
@@ -1334,8 +1142,8 @@ function App() {
                 <div className="news-meta">
                   <span className="news-source">{news.source}</span>
                   <span className="news-time">{news.time}</span>
-                </div>
               </div>
+            </div>
             </a>
           ))}
         </div>
@@ -1464,39 +1272,32 @@ function App() {
 
     return (
       <div key={crypto.id} className={`crypto-card ${index === 0 ? 'leader' : ''}`}>
-        <div className="card-header">
-          <img src={crypto.image} alt={crypto.name} />
-          <h3>{crypto.name} {index === 0 ? '👑' : ''}</h3>
-        </div>
-        <div className="card-body">
-          <div className="price-info">
-            <div className="main-price">
-              <p className="price">${crypto.current_price.toLocaleString()}</p>
-              <p className={`price-change ${changes.dailyChange >= 0 ? 'positive' : 'negative'}`}>
-                {changes.dailyChange.toFixed(2)}% ({timeRangeDisplay})
-              </p>
-            </div>
-            <div className="market-info">
-              <p className="market-cap">MCap: {formatMarketCap(crypto.market_cap)}</p>
-              <p className={`market-cap-change ${changes.yearlyChange >= 0 ? 'positive' : 'negative'}`}>
-                {changes.yearlyChange.toFixed(2)}% ({timeRangeDisplay})
-              </p>
-            </div>
+        <div className="crypto-info">
+          <div className="crypto-header">
+            <img src={crypto.image} alt={crypto.name} width="32" height="32" />
+            <h2>{crypto.name}</h2>
           </div>
-          <div className="chart-section">
-            <TimeRangeSelector activeRange={timeRange} onRangeChange={handleTimeRangeChange} />
-            <div className="chart-container">
-              <CryptoChart 
-                data={historicalData[crypto.id]}
-                symbol={crypto.symbol}
-                timeRange={timeRange}
-              />
+          <div className="crypto-price">
+            ${Number(crypto.current_price).toLocaleString('en-US', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            })}
+                </div>
+          <div className={`price-change ${changes.dailyChange >= 0 ? 'positive' : 'negative'}`}>
+            {changes.dailyChange > 0 ? '+' : ''}{changes.dailyChange.toFixed(2)}% ({timeRangeDisplay})
+                </div>
+              </div>
+        <div className="crypto-stats">
+          <div className="mcap">
+            MCap: {formatMarketCap(crypto.market_cap)}
             </div>
-          </div>
-        </div>
-      </div>
+          <div className={`price-change ${changes.yearlyChange >= 0 ? 'positive' : 'negative'}`}>
+            {changes.yearlyChange > 0 ? '+' : ''}{changes.yearlyChange.toFixed(2)}% ({timeRangeDisplay})
+                </div>
+                </div>
+              </div>
     );
-  }, [historicalData, timeRange, handleTimeRangeChange, calculateChanges]);
+  }, [historicalData, timeRange, calculateChanges]);
 
   if (!cryptoData) return <div className="loading">Loading dashboard...</div>;
   if (error) return <div className="error">{error}</div>;
@@ -1575,7 +1376,7 @@ function App() {
                   {tf}
                 </button>
               ))}
-            </div>
+                </div>
             <div className="ma-toggles">
               <label>
                 <input
@@ -1585,9 +1386,9 @@ function App() {
                 />
                 <span style={{ color: colors[symbol].text }}>Trend Line</span>
               </label>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
         <Bar
           ref={chartRef}
           data={{
@@ -1683,7 +1484,7 @@ function App() {
             }
           }}
         />
-      </div>
+                </div>
     );
   };
 
@@ -1697,7 +1498,7 @@ function App() {
           <div className="section-header">
             <h2>Price Comparison</h2>
             <DataFreshness timestamp={dataFreshness.prices} />
-          </div>
+                </div>
           <div className="chart-container">
             <TimeRangeSelector activeRange={timeRange} onRangeChange={handleTimeRangeChange} />
             <CombinedCryptoChart 
@@ -1705,25 +1506,25 @@ function App() {
               ethData={historicalData.ethereum}
               timeRange={timeRange}
             />
-          </div>
-        </div>
+              </div>
+            </div>
         
         <CryptoNews 
           newsData={newsData}
           isLoading={newsLoading}
         />
-      </div>
+          </div>
 
       {/* Scoreboard Section */}
       <div className="scoreboard">
         <div className="section-header">
           <h2>Crypto Leaderboard</h2>
           <DataFreshness timestamp={dataFreshness.prices} />
-        </div>
+            </div>
         <div className={`crypto-cards ${loading.prices ? 'loading-section' : ''}`}>
           {loading.prices && <LoadingOverlay />}
           {cryptoCards}
-        </div>
+            </div>
       </div>
 
       {/* Market Pressure Section */}
@@ -1757,7 +1558,7 @@ function App() {
       {exchangeReserves && (
         <div className="exchange-reserves">
           <div className="section-header">
-            <h2>Exchange Reserves</h2>
+          <h2>Exchange Reserves</h2>
             <DataFreshness timestamp={dataFreshness.reserves} />
           </div>
           <div className="reserves-cards">
@@ -1772,7 +1573,7 @@ function App() {
             <div className="reserves-card">
               <div className="reserves-header">
                 <img src="https://assets.coingecko.com/coins/images/279/small/ethereum.png" alt="ETH" className="crypto-icon" />
-                <h3>Ethereum</h3>
+              <h3>Ethereum</h3>
               </div>
               <p>{exchangeReserves.ethereum ? Number(exchangeReserves.ethereum).toLocaleString(undefined, {maximumFractionDigits: 2}) : '0'} ETH</p>
               <span className="reserves-note">Based on 24h volume</span>
@@ -1794,7 +1595,7 @@ function App() {
                 <p className="current-ratio-label">Current Ratio:</p>
                 <p className="current-ratio-value">{currentRatio}</p>
               </div>
-              {priceRatio.length > 1 && (
+          {priceRatio.length > 1 && (
                 <div className="ratio-change-container">
                   <p className={`ratio-change ${
                     priceRatio[priceRatio.length-1].ratio > priceRatio[0].ratio ? 'positive' : 'negative'
@@ -1905,4 +1706,4 @@ function App() {
   );
 }
 
-export default App;
+export default App; 
